@@ -1,6 +1,6 @@
 # Phylode — project rules
 
-> Repository: Strofai/Phylode | public
+> Repository: JonathansDev/Phylode | public
 
 A DNS gatekeeper that runs on a Mac that stays on and blocks ads, trackers, malicious
 domains and chatty appliances for every device on the network (a home, an office, a
@@ -62,7 +62,7 @@ Run this once before starting work and put the result in the first paragraph of 
 
 1. GitHub Dependabot alerts. `gh` has its connection reset on some networks; use curl
    instead:
-   `curl -s -H "Authorization: Bearer $(gh auth token)" "https://api.github.com/repos/Strofai/Phylode/dependabot/alerts?state=open"`.
+   `curl -s -H "Authorization: Bearer $(gh auth token)" "https://api.github.com/repos/JonathansDev/Phylode/dependabot/alerts?state=open"`.
    An empty array means none.
 2. `cargo deny check` (rules in `deny.toml`; all four lines must say ok). **Dependabot
    returning 0 does not mean you are clear** — run both.

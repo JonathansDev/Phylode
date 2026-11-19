@@ -52,7 +52,7 @@ Before you begin, you need:
 Then, in Terminal:
 
 ```bash
-git clone https://github.com/Strofai/Phylode.git
+git clone https://github.com/JonathansDev/Phylode.git
 cd Phylode
 cargo build --release
 sudo ./target/release/phylode install
@@ -130,7 +130,7 @@ You need an administrator account to change the lists.
 
 ## Update Phylode
 
-Each version is listed on the [Releases](https://github.com/Strofai/Phylode/releases) page
+Each version is listed on the [Releases](https://github.com/JonathansDev/Phylode/releases) page
 with what changed. To hear about new ones, choose Watch > Custom > Releases at the top of
 this page. Phylode never checks for updates itself, so nothing about your network leaves it.
 
@@ -155,7 +155,7 @@ version is installed.
 
 Run `phylode diagnostics`. It shows versions, states, counts and recent events, with
 network addresses and home folder names removed, so you can paste it into a public
-[bug report](https://github.com/Strofai/Phylode/issues/new/choose).
+[bug report](https://github.com/JonathansDev/Phylode/issues/new/choose).
 
 Don't post your query journal or the output of `phylode status`. They contain the
 browsing history of everyone on your network, and your settings.
