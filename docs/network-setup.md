@@ -7,7 +7,7 @@ your router. If you can't change your router's settings, you can
 
 Router menus differ from brand to brand, so the steps below name the settings to look for
 rather than exact menus. This guide hasn't yet been checked against every router; if a
-step doesn't match yours, [open an issue](https://github.com/Strofai/Phylode/issues/new/choose).
+step doesn't match yours, [open an issue](https://github.com/JonathansDev/Phylode/issues/new/choose).
 
 ## Before you begin
 
@@ -122,4 +122,4 @@ be reached — set it back to automatic before taking the Mac elsewhere.
   Devices go back to the router's DNS the next time they join the network.
 
 For anything else, run `phylode diagnostics` and include its output in a
-[bug report](https://github.com/Strofai/Phylode/issues/new/choose).
+[bug report](https://github.com/JonathansDev/Phylode/issues/new/choose).

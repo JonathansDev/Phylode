@@ -4,7 +4,7 @@
 
 Please do not open a public issue. Report it privately through GitHub instead:
 **Security** tab → **Report a vulnerability**
-(<https://github.com/Strofai/Phylode/security/advisories/new>).
+(<https://github.com/JonathansDev/Phylode/security/advisories/new>).
 
 Include what you ran, what you expected, what happened, and the commit you tested. A
 crashing input from the fuzzers is ideal.
@@ -14,7 +14,7 @@ fixes land on `main`, and the advisory is published once a fix is available.
 
 ## Supported versions
 
-Only the latest [release](https://github.com/Strofai/Phylode/releases) and the latest
+Only the latest [release](https://github.com/JonathansDev/Phylode/releases) and the latest
 `main` are supported. Fixes land on `main` first and ship in the next release.
 
 ## In scope
