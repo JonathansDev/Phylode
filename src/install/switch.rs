@@ -238,27 +238,21 @@ mod tests {
         assert!(read_saved_dns(&path).is_empty());
     }
 
-    /// Should change: a service name keeps spaces at either end, or `networksetup` cannot find
-    /// it again.
+    /// Should change: a service name keeps its spaces, inside and at either end, and its
+    /// slashes, or `networksetup` cannot find it again.
     /// Should not change: the notice line is skipped and a disabled service loses its `*`.
     #[test]
     fn network_service_names_are_kept_exactly() {
-        let output = "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n*Thunderbolt Bridge\n USB LAN \n\n";
+        let output = "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n\
+                      USB 10/100/1000 LAN\n*Thunderbolt Bridge\n USB LAN \n\n";
         assert_eq!(
             parse_network_services(output),
-            ["Wi-Fi", "Thunderbolt Bridge", " USB LAN "]
-        );
-    }
-
-    #[test]
-    fn network_services_skip_the_notice_and_keep_spaces_and_disabled_ones() {
-        let output = "An asterisk (*) denotes that a network service is disabled.\n\
-                      Wi-Fi\n\
-                      USB 10/100/1000 LAN\n\
-                      *Thunderbolt Bridge\n";
-        assert_eq!(
-            parse_network_services(output),
-            ["Wi-Fi", "USB 10/100/1000 LAN", "Thunderbolt Bridge"]
+            [
+                "Wi-Fi",
+                "USB 10/100/1000 LAN",
+                "Thunderbolt Bridge",
+                " USB LAN "
+            ]
         );
     }
 
