@@ -181,5 +181,7 @@ like a product's release history, not a work log.
   not even unsigned domains, unless signatures and proofs reach the device unchanged.**
   Proving a domain is unsigned takes a signed negative answer from its parent zone; Apple
   treats an answer that fails validation as no answer at all (WWDC22 session 10079). The
-  install workflow checks this against a 1.1.1.1 control; when the control fails too, the
-  run warns that it cannot tell rather than failing.
+  install workflow checks this with delv, a validating client independent of Apple's,
+  against 1.1.1.1 as the control, and again with Apple's own validator, which only warns:
+  its mDNSResponder builds of 2026-10-12 never finish proving a name unsigned, whatever the
+  resolver.

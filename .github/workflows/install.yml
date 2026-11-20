@@ -345,9 +345,36 @@ jobs:
           echo "loopback: $name in plaintext (control); outside: $encrypted packets to an encrypted upstream,"
           echo "$handshakes of them TLS handshake records, no plaintext DNS to it, and $name nowhere in the capture"
 
-      # An app that requires DNSSEC validation treats an answer it cannot validate as none at
-      # all, unsigned domains included. 1.1.1.1 is the control: if the probe fails there, the
-      # runner's network is the cause, not Phylode.
+      # A validating client checks the whole chain itself: signatures for a signed name, the
+      # parent's signed proof that an unsigned name is unsigned, and the signed proof that a
+      # name does not exist. delv (from BIND) is such a client, independent of Apple's, so it
+      # proves Phylode passes all three on unchanged; each result must match 1.1.1.1's.
+      - name: Signatures and proofs reach a validating client unchanged
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet bind
+          delv="$(brew --prefix bind)/bin/delv"
+          failed=0
+          for query in "isc.org A" "github.com A" "phylode-no-such-name.isc.org A"; do
+            # shellcheck disable=SC2086 # the name and the type are two arguments
+            control=$("$delv" @1.1.1.1 $query 2>&1 | grep -m1 '^; ' || true)
+            # shellcheck disable=SC2086
+            through=$("$delv" @127.0.0.1 $query 2>&1 | grep -m1 '^; ' || true)
+            echo "$query: 1.1.1.1 says '$control'; through Phylode '$through'"
+            case "$control" in
+              *"fully validated"* | *"unsigned answer"*) ;;
+              *) echo "::warning::$query did not validate against 1.1.1.1 either, so it says nothing about Phylode"; continue ;;
+            esac
+            [ "$through" = "$control" ] || failed=1
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::a validating client could not check an answer through Phylode"
+            exit 1
+          fi
+
+      # Apple's own validator, as an app that requires DNSSEC validation uses it. Its
+      # mDNSResponder builds of 2026-10-12, on both the macOS 15 and macOS 26 images, never
+      # finish proving a name unsigned, whatever the resolver, so the control fails there and
+      # the step above is what proves the passthrough. This one warns until Apple fixes it.
       - name: Apps that require DNSSEC validation connect through Phylode
         run: |
           cat > "$RUNNER_TEMP/validating.swift" <<'EOF'
