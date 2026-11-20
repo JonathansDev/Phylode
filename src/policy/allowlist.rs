@@ -113,14 +113,7 @@ impl Allowlist {
     }
 
     pub fn load_from_str(&self, text: &str) -> usize {
-        let entries: HashSet<String> = text
-            .lines()
-            .filter_map(|line| {
-                let line = line.split('#').next().unwrap_or("").trim();
-                let domain = line.trim_end_matches('.').to_ascii_lowercase();
-                super::is_list_domain(&domain).then_some(domain)
-            })
-            .collect();
+        let entries: HashSet<String> = super::list_domains(text).collect();
 
         let len = entries.len();
         let entries = Arc::new(entries);
