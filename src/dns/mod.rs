@@ -222,12 +222,12 @@ impl Proof {
         Self(records)
     }
 
-    /// See [`aged_copy`].
+    /// A copy with `elapsed` taken off every TTL, never below one second (why: `aged_copy`).
     pub fn aged(&self, elapsed: Duration) -> Self {
         Self(aged_copy(&self.0, elapsed))
     }
 
-    /// See [`memory_of`].
+    /// Roughly how many bytes of memory the proof occupies (how: `memory_of`).
     pub fn memory_estimate(&self) -> usize {
         memory_of(&self.0)
     }
@@ -294,7 +294,8 @@ impl Records {
             .min()
     }
 
-    /// See [`aged_copy`].
+    /// A copy with `elapsed` taken off every TTL, the proof's included, never below one second
+    /// (why: `aged_copy`).
     pub fn aged(&self, elapsed: Duration) -> Self {
         Self {
             answers: aged_copy(&self.answers, elapsed),
@@ -302,7 +303,7 @@ impl Records {
         }
     }
 
-    /// See [`memory_of`].
+    /// Roughly how many bytes of memory the answers and the proof occupy (how: `memory_of`).
     pub fn memory_estimate(&self) -> usize {
         memory_of(&self.answers).saturating_add(self.proof.memory_estimate())
     }
@@ -346,7 +347,7 @@ impl Records {
     /// Every other name this set sends a device to: CNAME targets, and the target name of
     /// HTTPS/SVCB records (RFC 9460 §2.5 — with `ipv4hint`/`ipv6hint` a device can connect
     /// to that endpoint without ever looking its name up). Normalized exactly as query names
-    /// are ([`Name::from_wire`]: `xn--` punycode, lowercase, no trailing dot).
+    /// are (`Name::from_wire`: `xn--` punycode, lowercase, no trailing dot).
     /// The gatekeeper matches these against the blocklist to catch cloaking: a
     /// first-party-looking subdomain that actually leads to a tracker.
     ///
