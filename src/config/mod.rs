@@ -25,6 +25,13 @@ const DEFAULT_CACHE_CAPACITY: usize = 20_000;
 const DEFAULT_STALE_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
 const DEFAULT_JOURNAL_RETENTION_DAYS: u32 = 10;
 
+/// Where the journal goes when the configuration names no `journal_dir`: the folder `install`
+/// prepares for the service account, which shares this constant.
+///
+/// What breaks if you change it: any other folder under `/var/log/phylode` belongs to root,
+/// so the service cannot open its journal there and runs without one.
+pub const DEFAULT_JOURNAL_DIR: &str = "/var/log/phylode/queries";
+
 /// The longest the journal may be kept: ten years. What breaks if you change it: the date
 /// arithmetic that finds expired days cannot reach far beyond this, and a value it cannot
 /// handle stops the journal writer for good.
@@ -441,7 +448,7 @@ impl Config {
         let mut allowlist = None;
         let mut user_blocklist = None;
         let mut block_ttl = DEFAULT_BLOCK_TTL;
-        let mut journal_dir = PathBuf::from("/var/log/phylode");
+        let mut journal_dir = PathBuf::from(DEFAULT_JOURNAL_DIR);
         let mut journal_retention_days = DEFAULT_JOURNAL_RETENTION_DAYS;
         let mut cache_capacity = DEFAULT_CACHE_CAPACITY;
         let mut stale_max_age = DEFAULT_STALE_MAX_AGE;
