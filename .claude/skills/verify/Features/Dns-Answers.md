@@ -30,12 +30,12 @@ Preconditions: the baseline in [Features.md](../Features.md); the instance answe
 
 | Action | Command | Observe |
 |---|---|---|
-| `A1` ask twice | `dig @::1 -p 15353 example.com` twice | an address both times; the second TTL lower; two `allowed` lines in `$W/journal/<day>.tsv` |
+| `A1` ask twice | `dig @::1 -p 15353 example.com` twice | an address both times, the second TTL never higher than the first; two `allowed` lines in `$W/journal/<day>.tsv` |
 | `A2` ask a listed name | `dig @::1 -p 15353 ads.example.com` and `... AAAA` and `... TXT` | `0.0.0.0`, `::`, NOERROR with SOA; TTL 2; `blocked` lines |
 | `A3` list an Apple host | add `captive.apple.com` to `$W/list.txt` by `mv` of a new file, wait for `blocklist-loaded`, then `dig @::1 -p 15353 captive.apple.com` | a real address, not `0.0.0.0` |
 | `A4` rebinding | query a public name known to resolve to a private address | NOERROR, no answer records, SOA TTL 2; a `rebind` line |
 | `A5` outside source | `dig -b <public IPv6> @<public IPv6> -p 15353 example.com` | no reply; an `outside-client` event (run the control: SKILL.md) |
-| `A6` signatures | `dig @::1 -p 15353 isc.org DNSKEY +dnssec` and `dig @::1 -p 15353 dnssec-failed.org` | RRSIG records and the `ad` flag; SERVFAIL and a `dnssec-bogus` line; `phylode --config "$W/c.conf" allow dnssec-failed.org` then a reply |
+| `A6` signatures | `dig @::1 -p 15353 isc.org DNSKEY +dnssec` and `dig @::1 -p 15353 dnssec-failed.org`; for the whole chain, `delv @::1 -p 15353 github.com` (BIND's validator, `brew install bind`) | RRSIG records, without the `ad` flag, since Phylode passes signatures on and does not validate them itself; SERVFAIL and a `dnssec-bogus` line; `phylode --config "$W/c.conf" allow dnssec-failed.org` then a reply; `delv` prints `; unsigned answer`, as it does against 1.1.1.1 |
 | `A7` no list | replace `$W/list.txt` with an unreadable file before start, then query `ads.example.com` | a real address; `fail-open` lines; a `blocklist-failed` event |
 
 Query lines are tab-separated: time, device, domain, type, outcome, reason. The outcome is
@@ -43,6 +43,10 @@ one of `blocked`, `allowed`, `fail-open`, `failed`, `overloaded`, `servfail`,
 `dnssec-bogus`, `rebind`, `local`.
 
 ## Gotchas
+
+- Apple's own validator (`requiresDNSSECValidation`) cannot prove `A6` on the CI runners:
+  their mDNSResponder builds of 2026-10-12 never finish proving a name unsigned, whatever the
+  resolver. Use `delv`, and compare with 1.1.1.1.
 
 - 5353 belongs to mDNSResponder; the scratch port is 15353.
 - Loopback is never rate-limited, so `A5`'s rate limit needs a served private address
