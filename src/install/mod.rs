@@ -52,9 +52,9 @@ const SERVICE_LOGS: [&str; 3] = [
     "/var/log/phylode/stdout.log",
     "/var/log/phylode/update.log",
 ];
-/// The default `journal_dir` in `deploy/phylode.conf`; the only folder under [`LOG_DIR`] the
-/// service account can write in.
-const JOURNAL_DIR: &str = "/var/log/phylode/queries";
+/// The only folder under [`LOG_DIR`] the service account can write in: the configuration's
+/// default `journal_dir`, and the one `deploy/phylode.conf` names.
+const JOURNAL_DIR: &str = crate::config::DEFAULT_JOURNAL_DIR;
 
 const GATEKEEPER_PLIST: &str = include_str!("../../deploy/com.Phylode.gatekeeper.plist");
 const UPDATE_PLIST: &str = include_str!("../../deploy/com.Phylode.blocklist-update.plist");
@@ -743,5 +743,16 @@ mod tests {
         let config = Config::load(&path).expect("the default configuration must load");
         assert_eq!(config.blocklists().len(), 2);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Should change: a configuration without a `journal_dir` line journals into the folder
+    /// install prepares for the service account, not one root owns.
+    /// Should not change: the shipped configuration names that same folder.
+    #[test]
+    fn a_configuration_without_journal_dir_journals_where_install_prepared() {
+        let config =
+            Config::parse("listen = 127.0.0.1:5353\nupstream = \"tls 192.0.2.53 dns.example\"\n")
+                .expect("a minimal configuration must load");
+        assert_eq!(config.journal_dir(), Path::new(JOURNAL_DIR));
     }
 }
