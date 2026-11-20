@@ -38,7 +38,8 @@ Preconditions: a branch pushed to GitHub. Every row runs in CI; read the run log
 
 - Never run `install`, `on`, `off`, `uninstall` or `forget` on the owner's Mac to check a
   change; they change launchd, DNS and system folders.
-- The Install test's DNSSEC step warns "cannot tell" when its 1.1.1.1 control fails on the
-  runner; that step then proved nothing about Phylode.
+- The Install test's Apple validator step warns "cannot tell" while Apple's validator on the
+  runners fails against 1.1.1.1 too; the delv step before it is what proves the DNSSEC
+  passthrough, and it must show the same result through Phylode as through 1.1.1.1.
 - A step that never ran is not a pass: check the step list in the log, not only the run's
   colour.
