@@ -80,3 +80,18 @@ never by name, and every other instance you started, remove every worktree
 and scratch directory you created, and show that they are gone: `pgrep -fl phylode` finds
 no instance, `git worktree list` shows only the main checkout, and the scratch paths no
 longer exist. Put that output in the report.
+
+## Model checks
+
+A model checker (TLC) tries every order of steps in a small TLA+ model, which tests cannot.
+The `Model check` workflow (`.github/workflows/model.yml`) runs each model, and also runs it
+against the broken order it guards, which must fail; never run TLC on the owner's Mac.
+
+| Model | Promise | Covers | Matches the code of |
+|---|---|---|---|
+| `verification/DnsSwitch.tla` | once `off` finishes, every network service has the DNS it had before `on`, whatever is interrupted | `on`, `switch_service`, `off`, `read_saved_dns`, `write_saved_dns` in `src/install/switch.rs` | `Fix: Keep hand-set DNS servers when phylode on is interrupted` |
+
+When a change touches a covered function, read it against the model: each action names the
+call it stands for. Update the model from the code, never to make it pass, and move the last
+column to the commit that confirmed it. A counterexample is replayed against the code step
+by step; if every step can happen, it is a bug: write the failing test, then fix the code.

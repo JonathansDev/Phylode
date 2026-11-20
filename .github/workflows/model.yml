@@ -1,0 +1,42 @@
+name: Model check
+
+# Runs TLC on the TLA+ models in verification/ whenever they or the code they describe
+# change. Not a required check, so the path filter cannot leave a pull request unmergeable.
+on:
+  push:
+    branches: [main]
+    paths: ["verification/**", "src/install/switch.rs", ".github/workflows/model.yml"]
+  pull_request:
+    paths: ["verification/**", "src/install/switch.rs", ".github/workflows/model.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dns-switch:
+    name: on and off put every service back
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The runner's own Java runs TLC; the jar is pinned by version and checksum.
+      - name: Fetch TLC 1.7.4
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/tla2tools.jar" \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  $RUNNER_TEMP/tla2tools.jar" \
+            | sha256sum -c
+      - name: The promise holds in the order the code uses
+        working-directory: verification
+        run: java -cp "$RUNNER_TEMP/tla2tools.jar" tlc2.TLC -workers auto -config DnsSwitch.cfg DnsSwitch.tla
+      # A check never seen failing proves nothing: the order before the fix must be rejected.
+      - name: The check rejects saving after the change
+        working-directory: verification
+        run: |
+          if java -cp "$RUNNER_TEMP/tla2tools.jar" tlc2.TLC -config DnsSwitchSaveLast.cfg DnsSwitch.tla \
+            > "$RUNNER_TEMP/save-last.txt"; then
+            cat "$RUNNER_TEMP/save-last.txt"
+            echo "::error::TLC accepted saving after the change, so it would not catch that bug"
+            exit 1
+          fi
+          grep -A60 "is violated" "$RUNNER_TEMP/save-last.txt"
