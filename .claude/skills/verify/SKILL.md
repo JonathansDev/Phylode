@@ -8,15 +8,33 @@ description: How to run Phylode and watch a change at its real surfaces — the 
 Phylode is a DNS service, so a change is verified by running it and sending it queries,
 not by reading the code or running the test suite.
 
+What to verify is listed in the feature map, [Features.md](Features.md): one file per surface
+under `Features/`. A change to what a user sees updates its feature file in the same commit.
+
 ## Start a scratch instance
 
 ```bash
 cargo build --release
 W=$(mktemp -d)
 printf '# Number of entries: 1\nads.example.com\n' > "$W/list.txt"
-printf 'listen = [::]:15353\nupstream = "tls 1.1.1.1 cloudflare-dns.com"\nblock_ttl_secs = 2\nblocklist = %s/list.txt\njournal_dir = %s/journal\n' "$W" "$W" > "$W/c.conf"
+printf 'listen = [::]:15353\nupstream = "tls 1.1.1.1 cloudflare-dns.com"\nblock_ttl_secs = 2\nblocklist = %s/list.txt\nallowlist = %s/allow.txt\nuser_blocklist = %s/block.txt\njournal_dir = %s/journal\n' "$W" "$W" "$W" "$W" > "$W/c.conf"
 ./target/release/phylode --config "$W/c.conf" > "$W/serve.log" 2>&1 &
+echo $! > "$W/pid"
 ```
+
+Ready means answering, not merely started: `dig @::1 -p 15353 example.com +short` returns
+an address. Without `allowlist` and `user_blocklist` in the configuration, `allow` and
+`block` stop with an error naming the missing key.
+
+## Doctor
+
+Run before driving, and again after anything surprising. All read-only:
+
+- `kill -0 "$(cat "$W/pid")"`: the instance this run started is alive (never find it by name).
+- `./target/release/phylode --version` matches `version` in `Cargo.toml`: the build is current.
+- `lsof -nP -a -p "$(cat "$W/pid")" -i :15353`: our process holds the port.
+- `./target/release/phylode --config "$W/c.conf" status`: reads this run's files, not
+  `/usr/local/etc/phylode.conf`.
 
 - Port 53 is bound by launchd in a real install; use a high port. 5353 belongs to mDNSResponder.
 - Use the release binary. With the macOS application firewall on, a binary the firewall
@@ -56,7 +74,9 @@ packets, send a well-formed query first.
 ## Clean up before reporting
 
 The Mac running these checks is the owner's own machine, so a verification leaves nothing
-behind. Before writing the report, stop every instance you started, remove every worktree
+behind. Copy the evidence you will quote (`serve.log`, the journal files, command output) out
+of the scratch directory first. Then stop the instance by its pid (`kill "$(cat "$W/pid")"`),
+never by name, and every other instance you started, remove every worktree
 and scratch directory you created, and show that they are gone: `pgrep -fl phylode` finds
 no instance, `git worktree list` shows only the main checkout, and the scratch paths no
 longer exist. Put that output in the report.
