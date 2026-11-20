@@ -168,13 +168,8 @@ fn read_entries(path: &Path) -> Result<BTreeSet<String>, CliError> {
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(source) => return Err(io_error(path, source)),
     };
-    Ok(text
-        .lines()
-        .filter_map(|line| {
-            let line = line.split('#').next().unwrap_or("").trim();
-            (!line.is_empty()).then(|| line.to_ascii_lowercase())
-        })
-        .collect())
+    // The service's own reading, so an entry it obeys is one these commands can find.
+    Ok(crate::policy::list_domains(&text).collect())
 }
 
 /// Rewrites the file in full. A `BTreeSet` keeps the order stable, so the file stays
@@ -309,6 +304,27 @@ mod tests {
             "it must no longer be on the allowlist"
         );
         assert!(blocked.contains("shop.example.com"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Should change: an entry written by hand the way the service still obeys it (a trailing
+    /// dot, capitals) is found and removed by `block`, so the service stops allowing it.
+    /// Should not change: the commands count entries as the service does.
+    #[test]
+    fn block_finds_a_hand_written_entry_the_service_obeys() {
+        let dir = temp_dir("hand");
+        let allow_file = dir.join("allow.txt");
+        let block_file = dir.join("block.txt");
+        std::fs::write(&allow_file, "Shop.Example.com.\nnot a domain\n").unwrap();
+        let service = crate::policy::Allowlist::new();
+        service.load_from_file(&allow_file).unwrap();
+        assert!(service.allows("shop.example.com"));
+        assert_eq!(entry_count(&allow_file).unwrap(), 1);
+
+        block("shop.example.com", Some(&allow_file), Some(&block_file)).unwrap();
+
+        service.load_from_file(&allow_file).unwrap();
+        assert!(!service.allows("shop.example.com"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

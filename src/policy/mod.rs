@@ -38,6 +38,39 @@ pub(crate) fn is_list_domain(domain: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
 }
 
+/// Every entry of a list file as Phylode reads it: comments and blank lines skipped, the
+/// address of a hosts-format line (`0.0.0.0 ads.example.com`) dropped, a trailing dot
+/// removed, lowercased, and only names [`is_list_domain`] accepts. The blocklist, the
+/// allowlist and the `allow`/`block` commands all read list files through this.
+///
+/// What breaks if you change it: read one file two ways and an entry one reader sees, the
+/// other misses; `phylode block` then says a domain is blocked while the allowlist still
+/// holds it.
+pub(crate) fn list_domains(text: &str) -> impl Iterator<Item = String> + '_ {
+    list_entries(text).filter(|domain| is_list_domain(domain))
+}
+
+/// Every domain-like entry in a list file, lowercased, without a trailing dot, before
+/// [`is_list_domain`] filters out those that can never match.
+pub(crate) fn list_entries(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.lines().flat_map(|line| {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let mut fields = line.split_whitespace();
+        let first = fields.next();
+        // In the hosts format the first field is an address and the domains follow; in a
+        // plain list the first field is already the domain.
+        let candidates: Vec<&str> = match first {
+            Some(address) if address.parse::<std::net::IpAddr>().is_ok() => fields.collect(),
+            Some(domain) => vec![domain],
+            None => Vec::new(),
+        };
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.trim_end_matches('.').to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    })
+}
+
 /// Matches if `hit` holds for the name itself or any of its parents (`ads.example.com` tries
 /// `ads.example.com`, then `example.com`, then `com`). Lowercases and strips the trailing
 /// dot first; an empty name never matches.

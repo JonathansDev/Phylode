@@ -221,7 +221,7 @@ impl Blocklist {
 /// skipping comments and blank lines.
 fn parse_into(text: &str, out: &mut HashSet<String>) {
     // Also drops local entries common in hosts files, such as `localhost`.
-    out.extend(entries(text).filter(|domain| super::is_list_domain(domain)));
+    out.extend(super::list_domains(text));
 }
 
 /// How many entries in a list file can never match anything: wildcards (`*.ads.example`),
@@ -231,33 +231,9 @@ fn parse_into(text: &str, out: &mut HashSet<String>) {
 /// What breaks if you change it: these are dropped when the list loads, so without this
 /// count a hand-written list that blocks nothing looks the same as one that works.
 pub fn unusable_entries(text: &str) -> usize {
-    entries(text)
+    super::list_entries(text)
         .filter(|domain| domain.contains('.') && !super::is_list_domain(domain))
         .count()
-}
-
-/// Every domain-like entry in a list file, lowercased, without a trailing dot.
-fn entries(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.lines().flat_map(|line| {
-        let line = line.split('#').next().unwrap_or("").trim();
-        let mut fields = line.split_whitespace();
-        let first = fields.next();
-        // In the hosts format the first field is an address and the domains follow; in a
-        // plain list the first field is already the domain.
-        let candidates: Vec<&str> = match first {
-            Some(address) if is_ip_literal(address) => fields.collect(),
-            Some(domain) => vec![domain],
-            None => Vec::new(),
-        };
-        candidates
-            .into_iter()
-            .map(|candidate| candidate.trim_end_matches('.').to_ascii_lowercase())
-            .collect::<Vec<_>>()
-    })
-}
-
-fn is_ip_literal(field: &str) -> bool {
-    field.parse::<std::net::IpAddr>().is_ok()
 }
 
 #[cfg(test)]
