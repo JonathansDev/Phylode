@@ -30,6 +30,13 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo build --release
+      # Kept so a runtime check (`.claude/skills/verify`) can run this exact binary instead of
+      # compiling it again on a laptop.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: phylode-release
+          path: target/release/phylode
+          retention-days: 3
 
       # With the firewall on, install must still succeed and register the binary on the firewall's
       # allowed list. Whether that entry is what lets other devices through cannot be shown here:

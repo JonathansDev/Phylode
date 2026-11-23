@@ -12,8 +12,9 @@ meets; proof through one entry point does not cover another the file lists.
 
 ## Baseline every recipe starts from
 
-- **Build**: `cargo build --release`, once per change. Use the release binary; see the
-  firewall note in [SKILL.md](SKILL.md).
+- **Build**: the release binary of the commit under test, once per change: the Install test's
+  `phylode-release` artifact, or `cargo build --release` when no run fits (SKILL.md 〈Start a
+  scratch instance〉). Use the release binary; see the firewall note in [SKILL.md](SKILL.md).
 - **Data**: an empty scratch directory `$W` with the configuration from SKILL.md 〈Start a
   scratch instance〉: one list entry (`ads.example.com`), empty allow and block files, and
   the journal in `$W/journal`.
