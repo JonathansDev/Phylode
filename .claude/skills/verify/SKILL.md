@@ -13,6 +13,12 @@ under `Features/`. A change to what a user sees updates its feature file in the 
 
 ## Start a scratch instance
 
+The release binary is built in CI: every Install test run keeps it for three days as the
+artifact `phylode-release` (`.github/workflows/install.yml`, which also has a manual trigger).
+Download the artifact of the run for the commit under test and unpack it to
+`target/release/phylode` rather than compiling on a laptop. Build it yourself only when no run
+fits:
+
 ```bash
 cargo build --release
 W=$(mktemp -d)
