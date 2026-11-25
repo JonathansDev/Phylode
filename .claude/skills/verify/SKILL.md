@@ -24,7 +24,7 @@ cargo build --release
 W=$(mktemp -d)
 printf '# Number of entries: 1\nads.example.com\n' > "$W/list.txt"
 printf 'listen = [::]:15353\nupstream = "tls 1.1.1.1 cloudflare-dns.com"\nblock_ttl_secs = 2\nblocklist = %s/list.txt\nallowlist = %s/allow.txt\nuser_blocklist = %s/block.txt\njournal_dir = %s/journal\n' "$W" "$W" "$W" "$W" > "$W/c.conf"
-./target/release/phylode --config "$W/c.conf" > "$W/serve.log" 2>&1 &
+./target/release/phylode run service --config "$W/c.conf" > "$W/serve.log" 2>&1 &
 echo $! > "$W/pid"
 ```
 
@@ -58,7 +58,7 @@ Run before driving, and again after anything surprising. All read-only:
 | Packets `dig` will not send (malformed, response-type) | `printf '<bytes>' \| nc -6 -u -w 2 [-s <addr>] <addr> 15353 \| xxd` |
 | TCP connection slots | Hold connections with `sleep 8 \| nc -6 ...`, then count the service's established sockets with `lsof -a -p <pid> -iTCP -sTCP:ESTABLISHED`. Each source may hold three |
 | List loading | Replace the list file with `mv` while the service runs; it reloads within seconds. `phylode --config <file> status` and `report` read the same files |
-| The daily updater | `bash deploy/update-blocklists.sh <scratch dir>` downloads the real lists; edit a copy of the script to test its limits |
+| The daily updater | `./target/release/phylode run lists <scratch dir> "$W/c.conf"` downloads the real lists with the script compiled in; to test its limits, run an edited copy of `deploy/update-blocklists.sh` with `bash` |
 | The installer | It changes system settings: never run it locally. Push to a branch, run `install.yml` (manual trigger) and read the run log |
 
 ## Always run the control

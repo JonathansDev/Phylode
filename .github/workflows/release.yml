@@ -1,0 +1,140 @@
+name: Release
+
+# A version tag (1.2.0, no leading v) builds the Apple silicon program on a macOS runner,
+# attaches the archive Homebrew downloads and two checksums to a GitHub release, and publishes
+# the formula to JonathansDev/homebrew-tap. Started by hand, it builds and checks the same
+# files and keeps them as an artifact, publishing nothing.
+#
+# The two checksums: the archive's, which the formula pins for Homebrew, and the program's,
+# which the upgrade helper on each Mac checks Homebrew's copy against before running it.
+# The release notes are the tag's message: `git tag -a 1.2.0` and write them there.
+
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+# Only this workflow may write: it creates the release.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      # A test setting compiled in would point the upgrade helper somewhere other than GitHub,
+      # or make the service exit on purpose (src/build.rs).
+      - name: Build with none of the test settings
+        run: |
+          if env | grep -E '^PHYLODE_TEST_'; then echo "::error::a test setting is set"; exit 1; fi
+          cargo build --release --locked
+
+      - name: The build is the release it claims to be
+        run: |
+          version=$(sed -nE 's/^version = "(.+)"$/\1/p' Cargo.toml | head -1)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::Cargo.toml's version $version is not a plain release number"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml's version $version"; exit 1
+          fi
+          bin=target/release/phylode
+          [ "$($bin --version)" = "Phylode $version" ] \
+            || { echo "::error::--version says '$($bin --version)', not a release build of $version"; exit 1; }
+          strings -a "$bin" | grep -q 'https://github.com/JonathansDev/Phylode/releases/download' \
+            || { echo "::error::the upgrade helper does not fetch checksums from GitHub"; exit 1; }
+          file "$bin" | tee /dev/stderr | grep -q 'arm64' \
+            || { echo "::error::not an Apple silicon program"; exit 1; }
+          codesign -dv "$bin" 2>&1 | tee /dev/stderr | grep -q 'Signature=adhoc' \
+            || { echo "::error::the program has no ad-hoc signature, so macOS will not run it"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Package the archive, both checksums and the formula
+        run: |
+          out="$RUNNER_TEMP/release"; staging="$RUNNER_TEMP/staging"
+          mkdir -p "$out" "$staging"
+          cp target/release/phylode "$staging/phylode"
+          archive="phylode-$VERSION-arm64.tar.gz"
+          tar -C "$staging" -czf "$out/$archive" phylode
+          ( cd "$staging" && shasum -a 256 phylode > "$out/phylode-$VERSION-arm64.bin.sha256" )
+          ( cd "$out" && shasum -a 256 "$archive" > "$archive.sha256" )
+          url="https://github.com/JonathansDev/Phylode/releases/download/$VERSION/$archive"
+          sha=$(cut -d' ' -f1 "$out/$archive.sha256")
+          sed -e "s|@URL@|$url|" -e "s|@VERSION@|$VERSION|" -e "s|@SHA256@|$sha|" \
+            .github/homebrew/phylode.rb > "$out/phylode.rb"
+          ls -l "$out"; cat "$out"/*.sha256; cat "$out/phylode.rb"
+
+      # Checked from the packaged files, as a Mac receives them, not from the build folder.
+      - name: The archive holds the program both checksums name, and it runs
+        run: |
+          out="$RUNNER_TEMP/release"; check="$RUNNER_TEMP/check"
+          mkdir -p "$check"
+          archive="phylode-$VERSION-arm64.tar.gz"
+          ( cd "$out" && shasum -a 256 -c "$archive.sha256" )
+          tar -C "$check" -xzf "$out/$archive"
+          [ "$(ls "$check")" = phylode ] || { echo "::error::the archive holds more than the program"; exit 1; }
+          ( cd "$check" && shasum -a 256 -c "$out/phylode-$VERSION-arm64.bin.sha256" )
+          [ "$("$check/phylode" --version)" = "Phylode $VERSION" ] \
+            || { echo "::error::the packaged program does not run"; exit 1; }
+          formula="$out/phylode.rb"
+          ruby -c "$formula"
+          if grep -n '@[A-Z0-9]*@' "$formula"; then echo "::error::the formula has a value left unfilled"; exit 1; fi
+          grep -q "sha256 \"$(cut -d' ' -f1 "$out/$archive.sha256")\"" "$formula" \
+            || { echo "::error::the formula pins another archive"; exit 1; }
+          grep -q "url \"https://github.com/JonathansDev/Phylode/releases/download/$VERSION/$archive\"" "$formula" \
+            || { echo "::error::the formula downloads from elsewhere"; exit 1; }
+          grep -q 'sudo #{opt_bin}/phylode install' "$formula" \
+            || { echo "::error::the formula does not print the first install command"; exit 1; }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: phylode-release-files
+          path: ${{ runner.temp }}/release
+          retention-days: 7
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out="$RUNNER_TEMP/release"
+          gh release create "$VERSION" --verify-tag --notes-from-tag --title "Phylode $VERSION" \
+            "$out/phylode-$VERSION-arm64.tar.gz" \
+            "$out/phylode-$VERSION-arm64.tar.gz.sha256" \
+            "$out/phylode-$VERSION-arm64.bin.sha256"
+
+      # The tap accepts this workflow's deploy key only. GitHub's host key is pinned rather
+      # than trusted on first sight (from `gh api meta`).
+      - name: Publish the formula to the tap
+        if: github.ref_type == 'tag'
+        env:
+          TAP_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          [ -n "$TAP_KEY" ] || { echo "::error::the HOMEBREW_TAP_DEPLOY_KEY secret is missing"; exit 1; }
+          ssh_dir="$RUNNER_TEMP/ssh"; mkdir -m 700 -p "$ssh_dir"
+          printf '%s\n' "$TAP_KEY" > "$ssh_dir/key"; chmod 600 "$ssh_dir/key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts"
+          git clone -q git@github.com:JonathansDev/homebrew-tap.git "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Formula"
+          cp "$RUNNER_TEMP/release/phylode.rb" "$RUNNER_TEMP/tap/Formula/phylode.rb"
+          cd "$RUNNER_TEMP/tap"
+          git add Formula/phylode.rb
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898319+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Chore: Update Phylode to $VERSION"
+          # HEAD:main, because the first release finds the tap empty, with no branch to track.
+          git push -q origin HEAD:main
+          rm -rf "$ssh_dir"

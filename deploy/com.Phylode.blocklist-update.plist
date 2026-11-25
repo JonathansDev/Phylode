@@ -6,11 +6,14 @@
     <string>com.Phylode.blocklist-update</string>
 
     <!-- Downloads the blocklists once a day. Downloading and validation both happen here; the
-         service itself never fetches anything from the network. -->
+         service itself never fetches anything from the network. Phylode runs the updater
+         compiled into it (deploy/update-blocklists.sh) with these two arguments, so macOS
+         lists this job as Phylode rather than bash. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/usr/local/libexec/phylode-update-lists</string>
+        <string>/usr/local/bin/phylode</string>
+        <string>run</string>
+        <string>lists</string>
         <string>/usr/local/etc/phylode/lists</string>
         <string>/usr/local/etc/phylode.conf</string>
     </array>

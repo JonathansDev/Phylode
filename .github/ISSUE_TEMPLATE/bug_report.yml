@@ -14,7 +14,7 @@ body:
         Security problems should not go here — use private reporting (see SECURITY.md).
         Issues are public. Do not paste your query journal, `phylode status` or the raw
         service log: they contain the domains people on your network looked up, your network
-        addresses and your file paths. `phylode diagnostics` below is written to be safe to
+        addresses and your file paths. `phylode feedback` below is written to be safe to
         share.
   - type: textarea
     id: steps
@@ -64,9 +64,9 @@ body:
     validations:
       required: true
   - type: textarea
-    id: diagnostics
+    id: feedback
     attributes:
-      label: Output of `phylode diagnostics`
+      label: Output of `phylode feedback`
       description: |
         Versions, states, counts and recent service events, with addresses and home folders
         removed. It contains no domains and no names from your configuration. Read it before

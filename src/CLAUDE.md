@@ -32,7 +32,10 @@
 `upstream/` upstream rotation | `policy/` blocklist, allowlist, local zones, rate limiting,
 rebinding defence | `cache/` bounded answer cache | `journal/` query and event journal |
 `report/` weekly summary | `config/` first-party parser | `cli/` commands |
-`install/` sets the boot service up and removes it |
+`install/` sets the boot service up and removes it, and puts the version before back when a
+new one does not keep answering | `upgrade/` the root helper that takes over a new version
+from Homebrew once it matches the checksum on GitHub, and the state it and `install` keep |
+`build` (`src/build.rs`) settings fixed at compile time, which only the cloud tests set |
 `gatekeeper.rs` the single seam between the layers. It stays one file on purpose: all of
 its non-test code does that one job, so splitting it would only scatter the seam.
 

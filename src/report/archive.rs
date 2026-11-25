@@ -64,7 +64,9 @@ pub fn archive_due(
         return Ok(None);
     }
 
-    let text = Summary::gather(journal_dir, &week).render_archive();
+    let text = Summary::gather(journal_dir, &week)
+        .with_upgrades(&crate::upgrade::state::history_text())
+        .render_archive();
     // Write to a staging file and rename: a crash mid-write leaves no half-written
     // archive, so "the file exists" means "this week was archived successfully".
     let staged = dir.join(format!(".{first}_{last}.tmp"));

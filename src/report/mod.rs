@@ -16,6 +16,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use crate::journal::{self, EventKind, LocalZone};
+use crate::upgrade::state::{self, Record};
 
 pub mod archive;
 
@@ -90,6 +91,8 @@ pub struct Summary {
     /// domain. Apple's hard rules are not counted.
     user_allowed_by_domain: HashMap<String, u64>,
     events: Vec<(String, String, String)>,
+    /// Upgrades, versions put back and versions refused on the summary's days.
+    upgrades: Vec<Record>,
     unreadable_files: Vec<String>,
     /// Whether a table reached [`MAX_TRACKED`] names, so later names went uncounted in it.
     /// The totals still count every line.
@@ -200,6 +203,17 @@ impl Summary {
             }
             _ => {}
         }
+    }
+
+    /// Adds the records of the upgrade history (the text of [`state::HISTORY_PATH`]) that fall
+    /// on the summary's days. They are listed under Phylode's own health.
+    #[must_use]
+    pub fn with_upgrades(mut self, history: &str) -> Self {
+        self.upgrades = state::parse_history(history)
+            .into_iter()
+            .filter(|record| self.days.iter().any(|day| day == record.day()))
+            .collect();
+        self
     }
 
     fn absorb_event(&mut self, line: &str) {
@@ -427,11 +441,19 @@ impl Summary {
         for (time, kind, detail) in notable {
             out.push_str(&format!("   · {time} {} — {detail}\n", event_label(kind)));
         }
+        for record in &self.upgrades {
+            out.push_str(&format!(
+                "   · {} {}\n",
+                record.timestamp(),
+                record.change().sentence()
+            ));
+        }
         if restarts <= 1
             && self.failed_queries == 0
             && self.overloaded_queries == 0
             && self.servfail_queries == 0
             && notable_count == 0
+            && self.upgrades.is_empty()
         {
             out.push_str("   · Everything else normal\n");
         }
@@ -617,6 +639,40 @@ mod tests {
 
     fn one_day() -> Vec<String> {
         vec!["2026-09-14".to_string()]
+    }
+
+    /// Should change: an upgrade, a version put back and a version refused on the summary's
+    /// days are listed under Phylode's own health, in the archived summary too, and the
+    /// section no longer says everything else is normal.
+    /// Should not change: records from other days are left out; there is still no eighth
+    /// section.
+    #[test]
+    fn upgrades_are_listed_under_phylodes_own_health() {
+        let dir =
+            std::env::temp_dir().join(format!("phylode-report-{}-upgrade", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let history = "2026-09-13 04:10:00\tupgraded\t1.2.0\t1.1.3\n\
+                       2026-09-14 04:10:00\tupgraded\t1.3.0\t1.2.0\n\
+                       2026-09-14 04:12:00\tput-back\t1.4.0\tstopped\n\
+                       2026-09-14 04:20:00\trefused\t1.5.0\tchecksum\n";
+        let s = Summary::gather(&dir, &one_day()).with_upgrades(history);
+        for text in [s.render(), s.render_archive()] {
+            let health = text
+                .split("\n3. ")
+                .nth(1)
+                .and_then(|rest| rest.split("\n4. ").next())
+                .unwrap();
+            assert!(health.contains("2026-09-14 04:10:00 Upgraded from 1.2.0 to 1.3.0"));
+            assert!(health.contains("Phylode 1.4.0 stopped within 60 seconds of starting"));
+            assert!(health.contains("Did not install 1.5.0"));
+            assert!(!health.contains("1.1.3"), "a record from another day");
+            assert!(!health.contains("Everything else normal"));
+            assert!(!text.contains("\n8. "));
+        }
+        let quiet = Summary::gather(&dir, &one_day()).with_upgrades("");
+        assert!(quiet.render().contains("Everything else normal"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

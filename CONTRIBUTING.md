@@ -29,7 +29,7 @@ network online wins over blocking more, and Apple's own services always pass.
 
 Use the bug report form. It follows the structure Apple asks for in its own bug reports: a title
 that names the problem and what triggers it, numbered steps to reproduce, expected results,
-actual results and your configuration. It also asks for the output of `phylode diagnostics`,
+actual results and your configuration. It also asks for the output of `phylode feedback`,
 which is written to be safe to post publicly (no domains, addresses or names). Do not paste
 the query journal, `phylode status` or the raw service log into an issue.
 Security problems go through private reporting instead — see [SECURITY.md](SECURITY.md).

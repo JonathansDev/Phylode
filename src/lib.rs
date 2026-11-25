@@ -55,6 +55,7 @@ macro_rules! out {
     }};
 }
 
+pub mod build;
 pub mod cache;
 pub mod cli;
 pub mod config;
@@ -66,4 +67,5 @@ pub mod install;
 pub mod journal;
 pub mod policy;
 pub mod report;
+pub mod upgrade;
 pub mod upstream;

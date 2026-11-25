@@ -7,7 +7,7 @@ name: Install test
 on:
   push:
     branches: [main]
-    paths: ["src/**", "deploy/**", "Cargo.toml", "Cargo.lock", ".github/workflows/install.yml"]
+    paths: ["src/**", "deploy/**", "Cargo.toml", "Cargo.lock", ".github/homebrew/**", ".github/scripts/**", ".github/workflows/install.yml"]
   # Every pull request: main requires this check, and one skipped by a path filter never reports.
   pull_request:
   workflow_dispatch:
@@ -22,7 +22,8 @@ concurrency:
 jobs:
   install:
     runs-on: macos-latest
-    timeout-minutes: 20
+    # Each install over a running service watches it for 60 seconds before it is done.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -75,6 +76,32 @@ jobs:
           [ "$id" -ge 400 ] && [ "$id" -le 499 ] \
             || { echo "::error::the service account took ID $id, outside 400-499"; exit 1; }
 
+      - name: Built from source, it registers no upgrade helper and records where it came from
+        run: |
+          ls /Library/LaunchDaemons | grep -i phylode
+          if test -e /Library/LaunchDaemons/com.Phylode.upgrade.plist \
+             || sudo launchctl print system/com.Phylode.upgrade >/dev/null 2>&1; then
+            echo "::error::a build from source registered the upgrade helper"; exit 1
+          fi
+          [ "$(ls /Library/LaunchDaemons | grep -c '^com\.Phylode\.')" -eq 2 ] \
+            || { echo "::error::expected two launchd jobs"; exit 1; }
+          if test -e /usr/local/libexec/phylode-update-lists; then
+            echo "::error::the old list update script is still installed"; exit 1
+          fi
+          status=$(phylode status)
+          echo "$status" | head -3
+          echo "$status" | grep -qx "Version: $(sed -nE 's/^version = "(.+)"$/\1/p' Cargo.toml | head -1), built from source" \
+            || { echo "::error::status does not say the version and that it was built from source"; exit 1; }
+          # The two jobs run as the service account, and run the installed program only.
+          for job in gatekeeper blocklist-update; do
+            printed=$(sudo launchctl print "system/com.Phylode.$job")
+            echo "$printed" | grep -E '^\s*(program|username) = ' || true
+            echo "$printed" | grep -qE '^\s*program = /usr/local/bin/phylode$' \
+              || { echo "::error::com.Phylode.$job does not run /usr/local/bin/phylode"; exit 1; }
+          done
+          ps -o user=,command= -p "$(sh .github/scripts/service-pid.sh)" | tee /dev/stderr \
+            | grep -q '^_phylode ' || { echo "::error::the service does not run as _phylode"; exit 1; }
+
       - name: Other devices can use it through this Mac's network address
         run: |
           lan=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
@@ -105,7 +132,7 @@ jobs:
 
       - name: The service refuses to run as root
         run: |
-          if out=$(sudo /usr/local/bin/phylode --config /usr/local/etc/phylode.conf 2>&1); then
+          if out=$(sudo /usr/local/bin/phylode run service --config /usr/local/etc/phylode.conf 2>&1); then
             echo "$out"; echo "::error::the service ran as root"; exit 1
           fi
           echo "$out"
@@ -151,7 +178,7 @@ jobs:
           ( set +e
             while true; do
               echo "attempt" >> "$RUNNER_TEMP/impostor.log"
-              ./target/release/phylode --config "$RUNNER_TEMP/impostor.conf" >> "$RUNNER_TEMP/impostor.log" 2>&1
+              ./target/release/phylode run service --config "$RUNNER_TEMP/impostor.conf" >> "$RUNNER_TEMP/impostor.log" 2>&1
               sleep 0.05
             done ) &
           loop=$!
@@ -170,7 +197,7 @@ jobs:
         run: |
           sudo launchctl bootout system/com.Phylode.gatekeeper
           while sudo launchctl print system/com.Phylode.gatekeeper >/dev/null 2>&1; do sleep 0.5; done
-          ./target/release/phylode --config "$RUNNER_TEMP/impostor.conf" > "$RUNNER_TEMP/impostor-on.log" 2>&1 &
+          ./target/release/phylode run service --config "$RUNNER_TEMP/impostor.conf" > "$RUNNER_TEMP/impostor-on.log" 2>&1 &
           impostor=$!
           for _ in $(seq 1 20); do
             dig @127.0.0.1 apple.com +short +time=1 +tries=1 | grep -q . && break
@@ -259,23 +286,23 @@ jobs:
           dig @127.0.0.1 apple.com +short +time=3 +tries=2 | grep -q . \
             || { echo "::error::no answer after forget"; exit 1; }
 
-      - name: diagnostics sees a healthy install and leaks no addresses or home folders
+      - name: feedback sees a healthy install and leaks no addresses or home folders
         run: |
-          out=$(sudo phylode diagnostics)
+          out=$(sudo phylode feedback)
           echo "$out"
-          echo "$out" | grep -qx 'Service answering: yes' || { echo "::error::diagnostics did not see the service answering"; exit 1; }
-          echo "$out" | grep -q 'domains loaded' || { echo "::error::diagnostics did not see the lists"; exit 1; }
+          echo "$out" | grep -qx 'Service answering: yes' || { echo "::error::feedback did not see the service answering"; exit 1; }
+          echo "$out" | grep -q 'domains loaded' || { echo "::error::feedback did not see the lists"; exit 1; }
           leaked=$(echo "$out" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -vxE '127\.0\.0\.1|0\.0\.0\.0' || true)
           if [ -n "$leaked" ] || echo "$out" | grep -q '/Users/'; then
-            echo "::error::diagnostics leaked: $leaked"; exit 1
+            echo "::error::feedback leaked: $leaked"; exit 1
           fi
 
       - name: launchd brings the service back after it dies
         run: |
-          pid=$(pgrep -x phylode)
+          pid=$(sh .github/scripts/service-pid.sh)
           sudo kill -9 "$pid"
           for _ in $(seq 1 30); do
-            new=$(pgrep -x phylode || true)
+            new=$(sh .github/scripts/service-pid.sh)
             if [ -n "$new" ] && [ "$new" != "$pid" ] && dig @127.0.0.1 apple.com +short +time=1 +tries=1 | grep -q .; then
               echo "restarted: pid $pid -> $new"; exit 0
             fi
@@ -287,13 +314,13 @@ jobs:
       # makes the self health check go unanswered while the process stays alive.
       - name: A service that stops answering restarts itself, and the summary says so
         run: |
-          pid=$(pgrep -x phylode)
+          pid=$(sh .github/scripts/service-pid.sh)
           echo "block drop quick on lo0 proto udp from any to any port 53" | sudo pfctl -q -f -
           token=$(sudo pfctl -E 2>&1 | sed -n 's/.*Token : //p')
           start=$(date +%s)
           restarted=0
           for _ in $(seq 1 90); do
-            new=$(pgrep -x phylode || true)
+            new=$(sh .github/scripts/service-pid.sh)
             if [ -n "$new" ] && [ "$new" != "$pid" ]; then restarted=1; break; fi
             sleep 1
           done
@@ -470,6 +497,7 @@ jobs:
           if pgrep -x phylode; then echo "::error::the service is still running"; exit 1; fi
           for f in /usr/local/bin/phylode /Library/LaunchDaemons/com.Phylode.gatekeeper.plist \
                    /Library/LaunchDaemons/com.Phylode.blocklist-update.plist \
+                   /Library/LaunchDaemons/com.Phylode.upgrade.plist /usr/local/libexec/phylode \
                    /usr/local/libexec/phylode-update-lists /etc/newsyslog.d/phylode.conf; do
             if test -e "$f"; then echo "::error::left behind: $f"; exit 1; fi
           done
@@ -484,3 +512,270 @@ jobs:
       - name: Service logs
         if: always()
         run: sudo tail -60 /var/log/phylode/stderr.log || true
+
+  # The path a stranger takes: brew install, then the one line Homebrew prints. Then what the
+  # upgrade helper does with a download that was changed, and how a version that does not keep
+  # answering is put back, through install and through an upgrade. A fresh runner, so Homebrew
+  # starts clean. Test builds stand in for releases: they fetch checksums from a folder here
+  # instead of GitHub (.github/scripts/homebrew-test.sh).
+  homebrew:
+    name: install from Homebrew
+    runs-on: macos-latest
+    timeout-minutes: 50
+    env:
+      PHYLODE_TEST_WORK: /private/tmp/phylode-homebrew
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # V0 is this commit's version; the others count up from it, because the helper only
+      # ever moves to a newer version.
+      - name: Build this commit as four versions
+        run: |
+          v=$(sed -nE 's/^version = "(.+)"$/\1/p' Cargo.toml | head -1)
+          IFS=. read -r major minor patch <<< "$v"
+          for n in 0 1 2 3; do echo "V$n=$major.$minor.$((patch + n))" >> "$GITHUB_ENV"; done
+          t=.github/scripts/homebrew-test.sh
+          bash $t build "$v"
+          bash $t build "$major.$minor.$((patch + 1))"
+          # Never answers.
+          bash $t build "$major.$minor.$((patch + 2))" 0
+          # Answers, then stops after 30 seconds.
+          bash $t build "$major.$minor.$((patch + 3))" 30
+
+      - name: Turn the macOS firewall on, as many Macs have it
+        run: sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
+
+      - name: brew install by its full name, then the line Homebrew prints
+        run: |
+          t=.github/scripts/homebrew-test.sh
+          bash $t tap
+          bash $t offer "$V0"
+          brew install jonathansdev/tap/phylode
+          brew info jonathansdev/tap/phylode | tee "$PHYLODE_TEST_WORK/caveats.txt"
+          grep -qx '  sudo /opt/homebrew/opt/phylode/bin/phylode install' "$PHYLODE_TEST_WORK/caveats.txt" \
+            || { echo "::error::Homebrew does not print the first install command"; exit 1; }
+          grep -qx '  sudo phylode uninstall' "$PHYLODE_TEST_WORK/caveats.txt" \
+            || { echo "::error::Homebrew does not print the reminder before brew uninstall"; exit 1; }
+          if test -e /opt/homebrew/bin/phylode; then echo "::error::Homebrew linked phylode onto PATH"; exit 1; fi
+          cmp /opt/homebrew/opt/phylode/bin/phylode "$PHYLODE_TEST_WORK/bin/$V0" \
+            || { echo "::error::Homebrew changed the program it installed, so no checksum would match"; exit 1; }
+          start=$(date +%s)
+          sudo /opt/homebrew/opt/phylode/bin/phylode install
+          echo "first install took $(( $(date +%s) - start ))s"
+
+      - name: phylode, with or without sudo, is the installed copy, and it answers
+        run: |
+          [ "$(which phylode)" = /usr/local/bin/phylode ] || { echo "::error::phylode is $(which phylode)"; exit 1; }
+          [ "$(sudo -s which phylode)" = /usr/local/bin/phylode ] \
+            || { echo "::error::sudo phylode is $(sudo -s which phylode)"; exit 1; }
+          [ "$(phylode --version)" = "Phylode $V0 (test build)" ] || { echo "::error::$(phylode --version)"; exit 1; }
+          phylode status | head -2
+          phylode status | grep -qx "Version: $V0, installed from Homebrew" \
+            || { echo "::error::status does not say it was installed from Homebrew"; exit 1; }
+          lan=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
+          dig @127.0.0.1 apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+            || { echo "::error::no answer on loopback"; exit 1; }
+          dig @"$lan" apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+            || { echo "::error::no answer on $lan with the firewall on"; exit 1; }
+          /usr/libexec/ApplicationFirewall/socketfilterfw --listapps | grep -q /usr/local/bin/phylode \
+            || { echo "::error::install did not register with the firewall"; exit 1; }
+          ls /Library/LaunchDaemons | grep '^com\.Phylode\.'
+          [ "$(ls /Library/LaunchDaemons | grep -c '^com\.Phylode\.')" -eq 3 ] \
+            || { echo "::error::expected three launchd jobs"; exit 1; }
+          for job in gatekeeper blocklist-update upgrade; do
+            sudo launchctl print "system/com.Phylode.$job" | grep -qE '^\s*program = /usr/local/bin/phylode$' \
+              || { echo "::error::com.Phylode.$job does not run /usr/local/bin/phylode"; exit 1; }
+          done
+
+      # What System Settings > General > Login Items & Extensions lists, from the database it
+      # reads: three items, each running the installed copy. macOS names a launchd job by its
+      # program's file name, so each shows as "phylode", whatever name the program embeds.
+      - name: macOS lists three background items, all the installed program
+        run: |
+          sudo sfltool dumpbtm > "$PHYLODE_TEST_WORK/btm.txt" 2>&1 || true
+          awk 'BEGIN{RS=""} tolower($0) ~ /phylode/' "$PHYLODE_TEST_WORK/btm.txt" | tee "$PHYLODE_TEST_WORK/btm-phylode.txt"
+          items=$(grep -cE '^\s*Identifier: [0-9]+\.com\.Phylode\.' "$PHYLODE_TEST_WORK/btm-phylode.txt" || true)
+          paths=$(grep -E '^\s*Executable Path:' "$PHYLODE_TEST_WORK/btm-phylode.txt" | sort -u)
+          echo "items: $items; programs: $paths"
+          [ "$items" -eq 3 ] || { echo "::error::macOS lists $items Phylode background items, not 3"; exit 1; }
+          [ "$paths" = "      Executable Path: /usr/local/bin/phylode" ] \
+            || { echo "::error::a background item runs something other than /usr/local/bin/phylode"; exit 1; }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: background-items
+          path: /private/tmp/phylode-homebrew/btm*.txt
+          retention-days: 14
+
+      - name: install puts the version before back, for one that never answers and one that stops
+        run: |
+          before=$(shasum -a 256 /usr/local/bin/phylode)
+          for v in "$V2" "$V3"; do
+            start=$(date +%s)
+            if out=$(sudo "$PHYLODE_TEST_WORK/bin/$v" install 2>&1); then
+              echo "$out"; echo "::error::installing $v succeeded"; exit 1
+            fi
+            echo "$out" | tail -4
+            echo "$v was put back after $(( $(date +%s) - start ))s"
+            echo "$out" | grep -q "so the version installed before it was put back and is answering" \
+              || { echo "::error::install did not put back the version before $v"; exit 1; }
+            [ "$(shasum -a 256 /usr/local/bin/phylode)" = "$before" ] \
+              || { echo "::error::the installed program is not the one from before"; exit 1; }
+            dig @127.0.0.1 apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+              || { echo "::error::no answer after putting back"; exit 1; }
+            grep -qx "$v" /usr/local/libexec/phylode/rejected \
+              || { echo "::error::$v was put back but is not remembered"; exit 1; }
+          done
+          # The upgrade steps below offer these two versions through Homebrew, so the helper
+          # must not know them yet.
+          sudo rm /usr/local/libexec/phylode/rejected
+          echo "$out" | grep -q "stopped within 60 seconds" \
+            || { echo "::error::the version that stopped was not reported as stopping"; exit 1; }
+          phylode status | grep -qx "Version: $V0, installed from Homebrew" \
+            || { echo "::error::putting back changed where it was installed from"; exit 1; }
+          sudo launchctl print system/com.Phylode.upgrade > /dev/null \
+            || { echo "::error::putting back unregistered the upgrade helper"; exit 1; }
+
+      - name: A download that does not match its checksum is refused, recorded, and not tried again
+        run: |
+          t=.github/scripts/homebrew-test.sh
+          n=$(bash $t lines)
+          bash $t offer "$V1" tamper
+          brew upgrade jonathansdev/tap/phylode
+          bash $t wait "$n"
+          tail -1 /usr/local/libexec/phylode/history.tsv \
+            | awk -F'\t' -v v="$V1" '$2 == "refused" && $3 == v && $4 == "checksum" { ok = 1 } END { exit !ok }' \
+            || { echo "::error::the helper did not record refusing $V1"; exit 1; }
+          [ "$(phylode --version)" = "Phylode $V0 (test build)" ] || { echo "::error::$V1 was installed"; exit 1; }
+          grep -qx "$V1" /usr/local/libexec/phylode/rejected || { echo "::error::$V1 is not remembered"; exit 1; }
+          phylode report | grep -q "Did not install $V1: Homebrew's copy does not match the checksum" \
+            || { echo "::error::the weekly summary does not say why"; exit 1; }
+          n=$(bash $t lines)
+          sudo launchctl kickstart -k system/com.Phylode.upgrade
+          sleep 10
+          sudo tail -3 /var/log/phylode/upgrade.log
+          sudo tail -1 /var/log/phylode/upgrade.log | grep -q "$V1 was put back or refused before" \
+            || { echo "::error::the helper did not skip $V1"; exit 1; }
+          [ "$(bash $t lines)" -eq "$n" ] || { echo "::error::the helper tried $V1 again"; exit 1; }
+
+      - name: An upgrade puts the version before back, for one that never answers and one that stops
+        run: |
+          t=.github/scripts/homebrew-test.sh
+          for v in "$V2" "$V3"; do
+            n=$(bash $t lines)
+            bash $t offer "$v"
+            brew upgrade jonathansdev/tap/phylode
+            bash $t wait "$n"
+            tail -1 /usr/local/libexec/phylode/history.tsv \
+              | awk -F'\t' -v v="$v" '$2 == "put-back" && $3 == v { ok = 1 } END { exit !ok }' \
+              || { echo "::error::the helper did not put back the version before $v"; exit 1; }
+            [ "$(phylode --version)" = "Phylode $V0 (test build)" ] || { echo "::error::$v stayed installed"; exit 1; }
+            grep -qx "$v" /usr/local/libexec/phylode/rejected || { echo "::error::$v is not remembered"; exit 1; }
+            lan=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
+            dig @"$lan" apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+              || { echo "::error::no answer on $lan after putting back $v"; exit 1; }
+          done
+
+      - name: status and the weekly summary show the version, where it came from and the last upgrade
+        run: |
+          phylode status | head -3 | tee "$PHYLODE_TEST_WORK/status.txt"
+          grep -q "^Last upgrade: .* Phylode $V3 stopped within 60 seconds of starting" "$PHYLODE_TEST_WORK/status.txt" \
+            || { echo "::error::status does not show the last upgrade"; exit 1; }
+          phylode report | sed -n '/^3\./,/^4\./p' | tee "$PHYLODE_TEST_WORK/report.txt"
+          for line in "Did not install $V1" "Phylode $V2 did not answer within 15 seconds" \
+                      "Phylode $V3 stopped within 60 seconds"; do
+            grep -q "$line" "$PHYLODE_TEST_WORK/report.txt" || { echo "::error::section 3 lacks: $line"; exit 1; }
+          done
+
+      # V4 is V0's program under a newer number; it never runs, because without a checksum the
+      # helper runs nothing.
+      - name: Without its checksum from GitHub, a new version waits, is reported once, and is tried again
+        run: |
+          t=.github/scripts/homebrew-test.sh
+          IFS=. read -r major minor patch <<< "$V0"
+          v4="$major.$minor.$((patch + 4))"
+          cp "$PHYLODE_TEST_WORK/bin/$V0" "$PHYLODE_TEST_WORK/bin/$v4"
+          n=$(bash $t lines)
+          bash $t offer "$v4"
+          rm "$PHYLODE_TEST_WORK/checksums/$v4/phylode-$v4-arm64.bin.sha256"
+          brew upgrade jonathansdev/tap/phylode
+          bash $t wait "$n"
+          tail -1 /usr/local/libexec/phylode/history.tsv \
+            | awk -F'\t' -v v="$v4" '$2 == "waiting" && $3 == v { ok = 1 } END { exit !ok }' \
+            || { echo "::error::the helper did not record waiting for $v4"; exit 1; }
+          [ "$(phylode --version)" = "Phylode $V0 (test build)" ] || { echo "::error::$v4 was installed"; exit 1; }
+          if grep -qx "$v4" /usr/local/libexec/phylode/rejected; then
+            echo "::error::$v4 is remembered as refused, so it would never be tried again"; exit 1
+          fi
+          phylode report | grep -q "Phylode $v4 is waiting: GitHub could not be reached" \
+            || { echo "::error::the weekly summary does not say $v4 is waiting"; exit 1; }
+          n=$(bash $t lines)
+          sudo launchctl kickstart -k system/com.Phylode.upgrade
+          sleep 10
+          sudo tail -1 /var/log/phylode/upgrade.log
+          sudo tail -1 /var/log/phylode/upgrade.log | grep -q "could not fetch the checksum for $v4" \
+            || { echo "::error::the helper did not try $v4 again"; exit 1; }
+          [ "$(bash $t lines)" -eq "$n" ] || { echo "::error::the same wait was recorded twice"; exit 1; }
+
+      - name: A Homebrew copy no newer than the installed one is left alone
+        run: |
+          t=.github/scripts/homebrew-test.sh
+          # Every version, so the install below puts V0 in place rather than finding it kept.
+          brew uninstall --force jonathansdev/tap/phylode
+          bash $t offer "$V0"
+          brew install jonathansdev/tap/phylode
+          [ "$(basename "$(readlink /opt/homebrew/opt/phylode)")" = "$V0" ] \
+            || { echo "::error::Homebrew does not offer $V0"; exit 1; }
+          # Let the wakes from brew uninstall and brew install finish first.
+          sleep 15
+          n=$(bash $t lines)
+          logs=$(sudo wc -l < /var/log/phylode/upgrade.log)
+          sudo launchctl kickstart -k system/com.Phylode.upgrade
+          for _ in $(seq 1 60); do
+            [ "$(sudo wc -l < /var/log/phylode/upgrade.log)" -gt "$logs" ] && break
+            sleep 1
+          done
+          sudo tail -1 /var/log/phylode/upgrade.log
+          sudo tail -1 /var/log/phylode/upgrade.log | grep -q "Homebrew has no newer version" \
+            || { echo "::error::the helper acted on the version already installed"; exit 1; }
+          [ "$(bash $t lines)" -eq "$n" ] || { echo "::error::the helper recorded a change"; exit 1; }
+          [ "$(phylode --version)" = "Phylode $V0 (test build)" ] || { echo "::error::$(phylode --version)"; exit 1; }
+
+      - name: The service and the daily list update run as the service account
+        run: |
+          ps -o user=,command= -p "$(sh .github/scripts/service-pid.sh)" | tee /dev/stderr \
+            | grep -q '^_phylode ' || { echo "::error::the service does not run as _phylode"; exit 1; }
+          sudo launchctl kickstart -k system/com.Phylode.blocklist-update
+          for _ in $(seq 1 50); do
+            line=$(ps -axo user=,command= | grep '[p]hylode run lists' || true)
+            [ -n "$line" ] && break
+            sleep 0.1
+          done
+          echo "$line"
+          echo "$line" | grep -q '^_phylode ' || { echo "::error::the list update does not run as _phylode"; exit 1; }
+
+      - name: uninstall says how to remove Homebrew's copy, then brew uninstall removes it
+        run: |
+          out=$(sudo phylode uninstall)
+          echo "$out"
+          echo "$out" | grep -q 'brew uninstall phylode' || { echo "::error::uninstall did not mention brew"; exit 1; }
+          brew uninstall phylode
+          for f in /usr/local/bin/phylode /usr/local/libexec/phylode /opt/homebrew/opt/phylode \
+                   /Library/LaunchDaemons/com.Phylode.upgrade.plist; do
+            if test -e "$f"; then echo "::error::left behind: $f"; exit 1; fi
+          done
+
+      - name: Logs
+        if: always()
+        run: |
+          sudo tail -40 /var/log/phylode/stderr.log || true
+          sudo cat /var/log/phylode/upgrade.log || true
+          cat /usr/local/libexec/phylode/history.tsv || true

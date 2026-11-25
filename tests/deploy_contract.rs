@@ -68,6 +68,62 @@ fn the_plist_starts_at_boot_and_restarts_on_crash() {
     assert!(text.contains("<key>KeepAlive</key>"));
 }
 
+/// Every launchd job `install` can put in place.
+const PLISTS: [&str; 3] = [
+    "com.Phylode.gatekeeper.plist",
+    "com.Phylode.blocklist-update.plist",
+    "com.Phylode.upgrade.plist",
+];
+
+#[test]
+fn every_plist_in_deploy_is_one_install_knows() {
+    // A plist added to deploy/ but not here would escape the checks below.
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("deploy");
+    let mut found: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("could not read {}: {error}", dir.display()))
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".plist"))
+        .collect();
+    found.sort();
+    let mut known: Vec<String> = PLISTS.iter().map(ToString::to_string).collect();
+    known.sort();
+    assert_eq!(found, known);
+}
+
+#[test]
+fn every_job_runs_only_the_installed_program() {
+    // macOS lists each background item by the program it runs. A job that runs bash, or a
+    // path that changes with each version (Homebrew's), shows up as something other than
+    // Phylode, or as a new item after every upgrade.
+    for plist in PLISTS {
+        let text = deploy_file(plist);
+        let program = text
+            .split("<key>ProgramArguments</key>")
+            .nth(1)
+            .and_then(|rest| rest.split("<string>").nth(1))
+            .and_then(|rest| rest.split_once("</string>"))
+            .map(|(value, _)| value);
+        assert_eq!(program, Some("/usr/local/bin/phylode"), "{plist}");
+        assert!(!text.contains("<key>Program</key>"), "{plist}");
+    }
+}
+
+#[test]
+fn only_the_upgrade_helper_runs_as_root() {
+    // The helper replaces the installed program, so it needs root; nothing else does.
+    let as_root: Vec<&str> = PLISTS
+        .into_iter()
+        .filter(|plist| !deploy_file(plist).contains("<key>UserName</key>"))
+        .collect();
+    assert_eq!(as_root, ["com.Phylode.upgrade.plist"]);
+    for plist in PLISTS {
+        assert!(
+            !deploy_file(plist).contains("<string>root</string>"),
+            "{plist}"
+        );
+    }
+}
+
 fn deploy_file(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("deploy")
@@ -162,10 +218,7 @@ fn every_log_the_plists_write_is_rotated() {
         .filter(|line| !line.trim_start().starts_with('#'))
         .filter_map(|line| line.split_whitespace().next())
         .collect();
-    for plist in [
-        "com.Phylode.gatekeeper.plist",
-        "com.Phylode.blocklist-update.plist",
-    ] {
+    for plist in PLISTS {
         let text = deploy_file(plist);
         let paths = text
             .split("<string>")

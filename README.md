@@ -44,12 +44,29 @@ services.
 
 ## Install Phylode
 
-Before you begin, you need:
+You need a Mac that stays on. Phylode is tested on macOS 26 and 27 on Apple silicon.
 
-- A Mac that stays on. Phylode is tested on macOS 26 and 27 on Apple silicon.
-- The Rust toolchain, from [rustup.rs](https://rustup.rs).
+### With Homebrew
 
-Then, in Terminal:
+On a Mac with Apple silicon and [Homebrew](https://brew.sh), in Terminal:
+
+```bash
+brew install JonathansDev/tap/phylode
+sudo /opt/homebrew/opt/phylode/bin/phylode install
+sudo phylode on
+```
+
+Homebrew prints the second line too. It keeps its own copy out of the way: `install` puts
+Phylode in `/usr/local/bin`, and from then on `phylode` is always that copy, with or without
+`sudo`, because anything in your account can change Homebrew's folder without a password.
+This first install runs Homebrew's copy as an administrator before anything has checked it,
+as any installer does; every later version is checked before it runs (see
+[Update Phylode](#update-phylode)).
+
+### From source
+
+On a Mac with an Intel processor, or to build Phylode yourself, you also need the Rust
+toolchain, from [rustup.rs](https://rustup.rs). Then, in Terminal:
 
 ```bash
 git clone https://github.com/JonathansDev/Phylode.git
@@ -58,6 +75,8 @@ cargo build --release
 sudo ./target/release/phylode install
 sudo phylode on
 ```
+
+### Either way
 
 `install` sets up Phylode to start with your Mac, downloads the lists and finishes once
 Phylode is answering. `on` makes your Mac use Phylode too, then shows your Mac's address on
@@ -124,7 +143,8 @@ You need an administrator account to change the lists.
 - `sudo phylode off` puts your Mac's DNS back to what it was before `phylode on`. Other
   devices keep using Phylode until you change your router's settings.
 - `sudo phylode uninstall` turns Phylode off and removes it. Your settings, lists and
-  query journal stay on your Mac.
+  query journal stay on your Mac. If you installed with Homebrew, run it before
+  `brew uninstall phylode`, which only removes Homebrew's copy.
 - `sudo phylode forget` deletes the query journal and the saved weekly summaries now,
   while Phylode keeps running.
 
@@ -132,9 +152,25 @@ You need an administrator account to change the lists.
 
 Each version is listed on the [Releases](https://github.com/JonathansDev/Phylode/releases) page
 with what changed. To hear about new ones, choose Watch > Custom > Releases at the top of
-this page. Phylode never checks for updates itself, so nothing about your network leaves it.
+this page. Phylode doesn't look for new versions itself.
 
-To update, in the folder you installed from:
+### With Homebrew
+
+```bash
+brew upgrade
+```
+
+No password is needed. Within about a minute of Homebrew finishing, Phylode takes over the
+new version by itself: it copies Homebrew's download somewhere only an administrator can
+change, and installs it only if it matches the checksum published for that version on the
+Releases page. Fetching that checksum from GitHub is the only time an upgrade contacts
+anything; GitHub sees your Mac's public address, as any website would, and nothing about
+your network is sent. If GitHub can't be reached, the new version waits and Phylode tries
+again daily.
+
+### From source
+
+In the folder you installed from:
 
 ```bash
 git switch main
@@ -147,13 +183,21 @@ sudo ./target/release/phylode install
 folder on no branch, and `git pull` alone stops with "You are not currently on a branch". To
 stay on releases instead, run `git fetch --tags` and `git checkout` the new version's tag.
 
-`install` replaces the running copy without a gap: Phylode keeps answering throughout, and
-your settings, lists and query journal stay as they are. `phylode --version` shows which
-version is installed.
+### Either way
+
+The new version replaces the running copy while port 53 stays open: a few lookups made in
+the moment of the swap may fail and be retried by the device, and your settings, lists and
+query journal stay as they are. If the new version doesn't start answering within 15
+seconds, or stops within its first minute, the version before it is put back and says why:
+`install` prints it, after `brew upgrade` the weekly summary says it, and either way that
+version isn't tried again. Because of that first-minute watch, `sudo phylode install` over
+an installed copy takes about a minute longer than a first install. A version that can't be
+installed for another reason is tried again the next day. `phylode status` shows which
+version is installed, where it came from and how the last upgrade went.
 
 ## If something goes wrong
 
-Run `phylode diagnostics`. It shows versions, states, counts and recent events, with
+Run `phylode feedback`. It shows versions, states, counts and recent events, with
 network addresses and home folder names removed, so you can paste it into a public
 [bug report](https://github.com/JonathansDev/Phylode/issues/new/choose).
 
@@ -201,19 +245,18 @@ browsing history of everyone on your network, and your settings.
   and restarts if it isn't. An upstream server that stops responding is tried again and
   returns when it recovers.
 - **It runs with as little access as it can.** Phylode runs as its own account, not as
-  root. macOS opens port 53 and hands it over.
+  root. macOS opens port 53 and hands it over. On a Mac installed with Homebrew, the upgrade
+  helper runs as root, only to put a checked new version in place.
 
 ## Project status
 
 The current version is 1.1.3; `main` is tested on every change and may be ahead of it.
-It's about 12,000 lines of Rust with 11 direct dependencies (181 packages in `Cargo.lock`)
-and 291 tests. Four entry points — packets from devices, packets from upstream servers,
+It's about 13,000 lines of Rust with 12 direct dependencies (181 packages in `Cargo.lock`)
+and 317 tests. Four entry points — packets from devices, packets from upstream servers,
 the blocklist parser and the configuration parser — are fuzzed by a GitHub Actions
 workflow. With the strictest lists loaded (about 760,000 domains), Phylode peaked at
 132 MB of memory while reloading them and answering 5003 devices at once; the answer
 cache, nearly empty in that run, can add up to 64 MB more.
-
-Coming next: installing with Homebrew, without the Rust toolchain.
 
 Not planned for now: routing all traffic through the Mac, protection away from your
 network, a graphical interface, and telemetry of any kind.

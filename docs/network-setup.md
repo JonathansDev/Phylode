@@ -121,5 +121,5 @@ be reached — set it back to automatic before taking the Mac elsewhere.
 - **To undo everything,** clear the DNS server fields you changed in step 2 and step 3.
   Devices go back to the router's DNS the next time they join the network.
 
-For anything else, run `phylode diagnostics` and include its output in a
+For anything else, run `phylode feedback` and include its output in a
 [bug report](https://github.com/JonathansDev/Phylode/issues/new/choose).

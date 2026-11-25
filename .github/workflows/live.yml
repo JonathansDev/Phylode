@@ -59,13 +59,13 @@ jobs:
       - name: Download the strictest lists
         run: |
           printf 'protection = strict\n' > "$LIVE_DIR/update.conf"
-          bash deploy/update-blocklists.sh "$LIVE_DIR/lists" "$LIVE_DIR/update.conf"
+          ./target/release/phylode run lists "$LIVE_DIR/lists" "$LIVE_DIR/update.conf"
 
       # One step, so the service and the memory sampler run throughout. The list reload at the
       # end holds the old and the new copy at once, which is when memory peaks.
       - name: A device over its limit stays limited while new sources fill the table
         run: |
-          ./target/release/phylode --config "$LIVE_DIR/phylode.conf" > "$LIVE_DIR/serve.log" 2>&1 &
+          ./target/release/phylode run service --config "$LIVE_DIR/phylode.conf" > "$LIVE_DIR/serve.log" 2>&1 &
           pid=$!
           ( peak=0
             while rss=$(ps -o rss= -p "$pid"); do

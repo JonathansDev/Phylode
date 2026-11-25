@@ -8,7 +8,7 @@
 )]
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use phylode::policy::held_entries;
@@ -49,10 +49,11 @@ fn update(root: &Path, lists: &Path, served: &Path) -> i32 {
     let config = root.join("phylode.conf");
     std::fs::write(&config, "protection = standard\n").unwrap();
 
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("deploy/update-blocklists.sh");
+    // Through Phylode, as launchd runs it, so the script compiled in and the way it is called
+    // are what is tested.
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
-    let output = Command::new("/bin/bash")
-        .arg(&script)
+    let output = Command::new(env!("CARGO_BIN_EXE_phylode"))
+        .args(["run", "lists"])
         .arg(lists)
         .arg(&config)
         .env("PATH", path)

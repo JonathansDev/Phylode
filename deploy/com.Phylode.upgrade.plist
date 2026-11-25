@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.Phylode.upgrade</string>
+
+    <!-- The upgrade helper, installed only on a Mac installed from Homebrew. It takes over a
+         new version once it matches the checksum published on GitHub (src/upgrade/). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/phylode</string>
+        <string>run</string>
+        <string>upgrade</string>
+    </array>
+
+    <!-- No UserName: the one job that runs as root, because it replaces the installed program
+         and restarts the service. tests/deploy_contract.rs allows no other. -->
+
+    <!-- Wakes when Homebrew changes its links, which `brew upgrade` does once the new version
+         is in place, and once a day in case that was missed or GitHub could not be reached. -->
+    <key>WatchPaths</key>
+    <array>
+        <string>/opt/homebrew/opt</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>41</integer>
+    </dict>
+
+    <!-- The install it runs reloads this job when its plist changed, which stops this process;
+         the install carries on in its own process group, and this keeps launchd from stopping
+         the rest of the group too. -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/phylode/upgrade.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/phylode/upgrade.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
