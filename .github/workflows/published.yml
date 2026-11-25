@@ -1,0 +1,110 @@
+name: Published release test
+
+# Installs the release published on JonathansDev/homebrew-tap the way the README says, on a
+# throwaway macOS runner, over the real HTTPS downloads that the install and upgrade tests
+# replace with local files. Started by hand after each release. With `from`, it first installs
+# that earlier release from the same tap, then lets `brew upgrade` bring the latest, so the
+# upgrade helper fetches the checksum from GitHub Releases as it does on a user's Mac.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "An earlier release to upgrade from, such as 1.2.0 (empty: install the latest only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  published:
+    name: install from the published tap
+    runs-on: macos-latest
+    # The upgrade watches the new version for 60 seconds before it is done.
+    timeout-minutes: 20
+    env:
+      PHYLODE_TEST_WORK: /private/tmp/phylode-published
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      FROM: ${{ inputs.from }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Turn the macOS firewall on, as many Macs have it
+        run: sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
+
+      - name: The tap offers a release
+        run: |
+          brew tap JonathansDev/tap
+          tap="$(brew --repository)/Library/Taps/jonathansdev/homebrew-tap"
+          latest=$(sed -nE 's/^  version "(.+)"$/\1/p' "$tap/Formula/phylode.rb")
+          [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the tap's formula names no release: '$latest'"; exit 1; }
+          echo "the tap offers $latest"
+          { echo "TAP=$tap"; echo "LATEST=$latest"; } >> "$GITHUB_ENV"
+
+      # The tap only holds the latest formula; the earlier one is the same text with that
+      # release's address and the checksum published beside its archive.
+      - name: Put the earlier release in the tap
+        if: env.FROM != ''
+        run: |
+          [[ "$FROM" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$FROM is not a release number"; exit 1; }
+          sha=$(curl -fsSL --proto =https --proto-redir =https --tlsv1.2 \
+            "https://github.com/JonathansDev/Phylode/releases/download/$FROM/phylode-$FROM-arm64.tar.gz.sha256" | cut -d' ' -f1)
+          [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::no archive checksum published for $FROM"; exit 1; }
+          sed -i '' -e "s/${LATEST//./\\.}/$FROM/g" -e "s/sha256 \"[0-9a-f]*\"/sha256 \"$sha\"/" "$TAP/Formula/phylode.rb"
+          grep -E '^  (url|version|sha256) ' "$TAP/Formula/phylode.rb"
+
+      - name: brew install by its full name, then the line Homebrew prints
+        run: |
+          first="${FROM:-$LATEST}"
+          brew install JonathansDev/tap/phylode
+          sudo /opt/homebrew/opt/phylode/bin/phylode install
+          [ "$(phylode --version)" = "Phylode $first" ] \
+            || { echo "::error::phylode --version says '$(phylode --version)', not the release $first"; exit 1; }
+          phylode status | grep -qx "Version: $first, installed from Homebrew" \
+            || { echo "::error::status does not say $first was installed from Homebrew"; exit 1; }
+          [ "$(ls /Library/LaunchDaemons | grep -c '^com\.Phylode\.')" -eq 3 ] \
+            || { echo "::error::expected three launchd jobs"; exit 1; }
+
+      - name: It answers on loopback and on the network address
+        run: |
+          lan=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
+          dig @127.0.0.1 apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+            || { echo "::error::no answer on loopback"; exit 1; }
+          dig @"$lan" apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+            || { echo "::error::no answer on $lan with the firewall on"; exit 1; }
+
+      - name: brew upgrade brings the latest, checked against GitHub
+        if: env.FROM != ''
+        run: |
+          t=.github/scripts/homebrew-test.sh
+          git -C "$TAP" checkout -- Formula/phylode.rb
+          n=$(bash $t lines)
+          brew upgrade JonathansDev/tap/phylode
+          bash $t wait "$n"
+          tail -1 /usr/local/libexec/phylode/history.tsv \
+            | awk -F'\t' -v v="$LATEST" '$2 == "upgraded" && $3 == v { ok = 1 } END { exit !ok }' \
+            || { echo "::error::the helper did not upgrade to $LATEST"; exit 1; }
+          [ "$(phylode --version)" = "Phylode $LATEST" ] || { echo "::error::$(phylode --version)"; exit 1; }
+          lan=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
+          dig @"$lan" apple.com +short +time=3 +tries=2 | grep -E '^[0-9.]+$' \
+            || { echo "::error::no answer on $lan after the upgrade"; exit 1; }
+          phylode status | head -3
+
+      - name: uninstall, then brew uninstall, leaves nothing behind
+        run: |
+          sudo phylode uninstall
+          brew uninstall phylode
+          for f in /usr/local/bin/phylode /usr/local/libexec/phylode /opt/homebrew/opt/phylode \
+                   /Library/LaunchDaemons/com.Phylode.upgrade.plist; do
+            if test -e "$f"; then echo "::error::left behind: $f"; exit 1; fi
+          done
+
+      - name: Logs
+        if: always()
+        run: |
+          sudo tail -40 /var/log/phylode/stderr.log || true
+          sudo cat /var/log/phylode/upgrade.log || true
+          cat /usr/local/libexec/phylode/history.tsv || true
