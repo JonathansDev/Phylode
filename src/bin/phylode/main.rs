@@ -1,5 +1,8 @@
 //! Phylode's entry point: reads the command line and runs the command it names, from
 //! `install` to `report`. Running the service itself is [`service`].
+//!
+//! The commands are flat, one verb per job. The three launchd jobs enter through `phylode run
+//! service | lists | upgrade`, which the help leaves out because nobody types them.
 
 #![forbid(unsafe_code)]
 
@@ -7,34 +10,34 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use phylode::cli;
 use phylode::config::Config;
-use phylode::diagnostics;
-use phylode::install;
 use phylode::journal::{self, LocalZone, OlderDetail};
 use phylode::policy::{Allowlist, Blocklist, held_entries, held_path};
-use phylode::report;
+use phylode::upgrade::{self, state};
+use phylode::{build, cli, diagnostics, install, report};
 use phylode::{log_line, out, out_line};
 
 mod service;
 
+/// What `phylode`, `phylode help` and a mistyped command print. What breaks if you change it:
+/// `tests/closed_output.rs` checks it lists exactly the commands people type.
 const USAGE: &str = "\
 Usage:
   sudo phylode install           install or update the boot service
+  sudo phylode uninstall         remove the service (your lists and journal stay)
   sudo phylode on                point this Mac's DNS at it
   sudo phylode off               put this Mac's DNS back as it was before on
-  sudo phylode uninstall         remove the service (your lists and journal stay)
-  sudo phylode forget            delete the lookup journal and saved weekly summaries now
   phylode allow <domain>         allow a domain
   phylode block <domain>         block a domain
-  phylode status                 show the current configuration and list status
+  phylode status                 show the version, configuration and list status
   phylode report [days]          weekly summary (7 days by default)
-  phylode diagnostics            a report to paste into a bug report; holds no domains,
+  sudo phylode forget            delete the lookup journal and saved weekly summaries now
+  phylode feedback               a report to paste into a bug report; holds no domains,
                                  addresses or names
   phylode --version              show which version is installed
-  phylode [--config <file>]      run Phylode in the foreground
 
-allow and block each undo the other, taking effect within seconds.";
+allow and block each undo the other, taking effect within seconds.
+--config <file> reads another configuration than /usr/local/etc/phylode.conf.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -48,9 +51,16 @@ fn main() -> ExitCode {
 }
 
 enum Command {
-    Serve {
+    /// `run service`: the service itself, as launchd starts it.
+    RunService {
         config_path: PathBuf,
     },
+    /// `run lists`: the daily list update, given the list folder and configuration.
+    RunLists {
+        args: Vec<String>,
+    },
+    /// `run upgrade`: the upgrade helper.
+    RunUpgrade,
     Allow {
         config_path: PathBuf,
         domain: String,
@@ -62,7 +72,7 @@ enum Command {
     Status {
         config_path: PathBuf,
     },
-    Diagnostics {
+    Feedback {
         config_path: PathBuf,
     },
     Report {
@@ -93,11 +103,15 @@ impl Command {
         }
 
         match rest.as_slice() {
-            [] => Ok(Self::Serve { config_path }),
-            ["--help" | "-h" | "help"] => Ok(Self::Help),
+            [] | ["--help" | "-h" | "help"] => Ok(Self::Help),
             ["--version" | "-V" | "version"] => Ok(Self::Version),
+            ["run", "service"] => Ok(Self::RunService { config_path }),
+            ["run", "lists", args @ ..] if args.len() <= 2 => Ok(Self::RunLists {
+                args: args.iter().map(ToString::to_string).collect(),
+            }),
+            ["run", "upgrade"] => Ok(Self::RunUpgrade),
             ["status"] => Ok(Self::Status { config_path }),
-            ["diagnostics"] => Ok(Self::Diagnostics { config_path }),
+            ["feedback"] => Ok(Self::Feedback { config_path }),
             ["install"] => Ok(Self::Install),
             ["on"] => Ok(Self::On),
             ["off"] => Ok(Self::Off),
@@ -138,10 +152,34 @@ impl Command {
                 ExitCode::SUCCESS
             }
             Self::Version => {
-                out_line!("Phylode {}", env!("CARGO_PKG_VERSION"));
+                if build::is_test_build() {
+                    out_line!("Phylode {} (test build)", env!("CARGO_PKG_VERSION"));
+                } else {
+                    out_line!("Phylode {}", env!("CARGO_PKG_VERSION"));
+                }
                 ExitCode::SUCCESS
             }
-            Self::Serve { config_path } => service::serve(&config_path),
+            Self::RunService { config_path } => service::serve(&config_path),
+            Self::RunLists { args } => match install::run_list_update(&args) {
+                Ok(status) => status
+                    .code()
+                    .and_then(|code| u8::try_from(code).ok())
+                    .map_or(ExitCode::FAILURE, ExitCode::from),
+                Err(error) => {
+                    log_line!("Could not run the list update: {error}");
+                    ExitCode::FAILURE
+                }
+            },
+            Self::RunUpgrade => match upgrade::run() {
+                Ok(step) => {
+                    log_line!("{} {step}", journal_now());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    log_line!("{} {error}", journal_now());
+                    ExitCode::FAILURE
+                }
+            },
             Self::Allow {
                 config_path,
                 domain,
@@ -151,7 +189,7 @@ impl Command {
                 domain,
             } => edit(&config_path, &domain, cli::block),
             Self::Status { config_path } => status(&config_path),
-            Self::Diagnostics { config_path } => diagnostics(&config_path),
+            Self::Feedback { config_path } => feedback(&config_path),
             Self::Report { config_path, days } => weekly_report(&config_path, days),
             Self::Install => {
                 let result = install::install();
@@ -184,12 +222,20 @@ impl Command {
                     }
                 }
             })),
-            Self::Uninstall => finish(install::uninstall().map(|restored| {
-                for service in restored {
-                    out_line!("DNS back as it was: {service}");
-                }
-                out_line!("Removed.\n\n{}", install::leftovers_message());
-            })),
+            Self::Uninstall => {
+                // Read before uninstall removes it.
+                let installed = state::Installed::read();
+                finish(install::uninstall().map(|restored| {
+                    for service in restored {
+                        out_line!("DNS back as it was: {service}");
+                    }
+                    out_line!("Removed.\n\n{}", install::leftovers_message());
+                    if installed.is_some_and(|i| i.source() == state::Source::Homebrew) {
+                        out_line!("Homebrew's copy is still there. To remove it too:");
+                        out_line!("  brew uninstall phylode");
+                    }
+                }))
+            }
             Self::Forget => finish(install::forget().map(|removed| {
                 out_line!(
                     "Deleted {}: every recorded lookup and saved weekly summary. Lookups from now \
@@ -249,6 +295,14 @@ fn status(config_path: &Path) -> ExitCode {
         return ExitCode::from(2);
     };
 
+    out_line!("{}", version_line(state::Installed::read()));
+    if let Some(record) = state::last_record() {
+        out_line!(
+            "Last upgrade: {} — {}",
+            record.timestamp(),
+            record.change().sentence()
+        );
+    }
     out_line!("Configuration: {}", config_path.display());
     let extra: Vec<String> = config
         .served_networks()
@@ -404,6 +458,28 @@ fn status(config_path: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// This program's version and, when `install` recorded one, the installed copy's version and
+/// where it came from.
+fn version_line(installed: Option<state::Installed>) -> String {
+    let own = env!("CARGO_PKG_VERSION");
+    match installed {
+        None => format!("Version: {own}"),
+        Some(installed) if installed.version().to_string() == own => {
+            format!("Version: {own}, {}", installed.source().label())
+        }
+        Some(installed) => format!(
+            "Version: {own} (the installed copy is {}, {})",
+            installed.version(),
+            installed.source().label()
+        ),
+    }
+}
+
+/// Now, as the journal writes times, for the upgrade helper's log.
+fn journal_now() -> String {
+    journal::Civil::from_unix(journal::unix_now(), &local_zone()).timestamp_string()
+}
+
 fn weekly_report(config_path: &Path, days: u32) -> ExitCode {
     let Some(config) = load_config(config_path) else {
         return ExitCode::from(2);
@@ -414,7 +490,8 @@ fn weekly_report(config_path: &Path, days: u32) -> ExitCode {
         out_line!("The journal keeps {kept} days, so this covers the last {kept}.\n");
     }
     let dates = report::recent_days(journal::unix_now(), &local_zone(), days.min(kept.max(1)));
-    let summary = report::Summary::gather(config.journal_dir(), &dates);
+    let summary =
+        report::Summary::gather(config.journal_dir(), &dates).with_upgrades(&state::history_text());
     out_line!("{}", summary.render());
     let archive = config.journal_dir().join(report::archive::ARCHIVE_DIR);
     if archive.is_dir() {
@@ -503,9 +580,10 @@ fn age_in_days(path: &Path) -> Option<u64> {
     Some(age.as_secs() / 86_400)
 }
 
-/// Gathers what `diagnostics::render` prints. Every read is allowed to fail — a broken
-/// installation is exactly when this gets run — and a failure becomes a line, not an exit.
-fn diagnostics(config_path: &Path) -> ExitCode {
+/// `phylode feedback`: gathers what `diagnostics::render` prints. Every read is allowed to
+/// fail — a broken installation is exactly when this gets run — and a failure becomes a line,
+/// not an exit.
+fn feedback(config_path: &Path) -> ExitCode {
     let config = Config::load(config_path);
     let macos = std::process::Command::new("/usr/bin/sw_vers")
         .arg("-productVersion")
@@ -599,6 +677,60 @@ mod tests {
         }
         let args = vec!["versions".to_string()];
         assert!(Command::parse(&args).is_err());
+    }
+
+    fn parse(words: &[&str]) -> Result<Command, String> {
+        let args: Vec<String> = words.iter().map(ToString::to_string).collect();
+        Command::parse(&args)
+    }
+
+    /// Should change: bare `phylode` prints the help instead of starting the service, the
+    /// service and the two other launchd jobs enter through `run`, and `feedback` replaces
+    /// `diagnostics`.
+    /// Should not change: `--config` still applies wherever it is written.
+    #[test]
+    fn the_commands_are_flat_and_launchd_enters_through_run() {
+        assert!(matches!(parse(&[]), Ok(Command::Help)));
+        assert!(matches!(parse(&["help"]), Ok(Command::Help)));
+        assert!(matches!(
+            parse(&["run", "service", "--config", "/tmp/x.conf"]),
+            Ok(Command::RunService { config_path }) if config_path == Path::new("/tmp/x.conf")
+        ));
+        assert!(matches!(
+            parse(&["--config", "/tmp/x.conf", "run", "service"]),
+            Ok(Command::RunService { config_path }) if config_path == Path::new("/tmp/x.conf")
+        ));
+        assert!(matches!(
+            parse(&["run", "lists", "/a", "/b"]),
+            Ok(Command::RunLists { args }) if args == ["/a", "/b"]
+        ));
+        assert!(
+            matches!(parse(&["run", "lists"]), Ok(Command::RunLists { args }) if args.is_empty())
+        );
+        assert!(parse(&["run", "lists", "/a", "/b", "/c"]).is_err());
+        assert!(matches!(
+            parse(&["run", "upgrade"]),
+            Ok(Command::RunUpgrade)
+        ));
+        assert!(parse(&["run"]).is_err());
+        assert!(matches!(parse(&["feedback"]), Ok(Command::Feedback { .. })));
+        assert!(parse(&["diagnostics"]).is_err());
+        assert!(parse(&["--config", "/tmp/x.conf"]).is_ok_and(|c| matches!(c, Command::Help)));
+    }
+
+    #[test]
+    fn the_version_line_names_where_the_installed_copy_came_from() {
+        let own = upgrade::Version::current().unwrap();
+        let older = upgrade::Version::parse("0.0.1").unwrap();
+        assert_eq!(version_line(None), format!("Version: {own}"));
+        assert_eq!(
+            version_line(Some(state::Installed::new(own, state::Source::Homebrew))),
+            format!("Version: {own}, installed from Homebrew")
+        );
+        assert_eq!(
+            version_line(Some(state::Installed::new(older, state::Source::Built))),
+            format!("Version: {own} (the installed copy is 0.0.1, built from source)")
+        );
     }
 
     /// Should change: a count of 1 uses the singular form.

@@ -90,8 +90,14 @@ Run this once before starting work and put the result in the first paragraph of 
   machine. `live.yml` drives a release build from 5003 source addresses, for behaviour one
   Mac cannot produce, and measures peak memory with the strictest lists. `upgrade.yml`
   installs the previous release and runs the README's update steps exactly as written.
-  `commits.yml` checks every new commit's
+  `install.yml` and `upgrade.yml` also install from a local Homebrew tap, with test builds
+  that read checksums from a folder on the runner instead of GitHub (`src/build.rs`,
+  `.github/scripts/homebrew-test.sh`). `commits.yml` checks every new commit's
   message against "Commits and pushes" below (`.github/scripts/check-commit-messages.sh`).
+  `release.yml` runs on a version tag (`1.2.0`, no `v`): it builds the Apple silicon
+  program, attaches it with its checksums to the release, and publishes the formula
+  (`.github/homebrew/phylode.rb`) to `JonathansDev/homebrew-tap`; started by hand, it only
+  builds and checks them.
 - `.claude/settings.json` applies to every Claude Code session in this repository, cloud ones
   included: it keeps session links out of commits and pull requests and refuses force pushes,
   branch deletion and `gh repo delete`. Keep anything a cloud session must obey there or in

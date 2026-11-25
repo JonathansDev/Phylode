@@ -17,8 +17,16 @@
   assume that number.
 - **The one thing that will take port 53 away is macOS Internet Sharing**: turn it on and
   `mDNSResponder` occupies 53, leaving this program unable to bind. Never enable it.
-- Daily blocklist updates run through `update-blocklists.sh` and
-  `com.Phylode.blocklist-update.plist`: the new list is only swapped in after its entry
+- **Every launchd job runs `/usr/local/bin/phylode` and nothing else** (`run service`, `run
+  lists`, `run upgrade`), because macOS lists background items by the program they run: a
+  job that ran `bash`, or Homebrew's per-version path, would show up as something other
+  than Phylode or as a new item after each upgrade. `tests/deploy_contract.rs` checks it.
+- `com.Phylode.upgrade.plist` is the one job that runs as root, and `install` registers it
+  only for a Homebrew install. It wakes on changes to `/opt/homebrew/opt` and daily, and
+  sets `AbandonProcessGroup`, because the install it starts may reload this very job.
+- Daily blocklist updates run through `update-blocklists.sh`, compiled into the program and
+  run by `phylode run lists` with the arguments `com.Phylode.blocklist-update.plist` gives
+  it as the script's positional arguments: the new list is only swapped in after its entry
   count validates and the previous one is kept. One with under half the entries of the list
   in use is set aside as `<name>.held.txt` (`held_path` in `src/policy/blocklist.rs`), which
   the service journals and `phylode status` explains; `tests/list_update.rs` runs the

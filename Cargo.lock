@@ -844,6 +844,7 @@ dependencies = [
  "hickory-server",
  "jiff",
  "raunch",
+ "ring",
  "system-configuration",
  "thiserror",
  "tokio",

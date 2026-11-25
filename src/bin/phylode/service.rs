@@ -48,6 +48,17 @@ pub(crate) fn serve(config_path: &Path) -> ExitCode {
     let Some(config) = load_config(config_path) else {
         return ExitCode::from(2);
     };
+    if let Some(seconds) = phylode::build::TEST_EXIT_AFTER.and_then(|s| s.parse::<u64>().ok()) {
+        // A test build standing in for a broken new version (`phylode::build`).
+        log_line!("Test build: exiting after {seconds} seconds");
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(seconds));
+            std::process::exit(1);
+        });
+        if seconds == 0 {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

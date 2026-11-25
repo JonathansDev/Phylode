@@ -28,9 +28,19 @@ Only the latest [release](https://github.com/JonathansDev/Phylode/releases) and 
   usable in reflection attacks.
 - Query data leaving the machine other than the encrypted query to the chosen upstream.
 - A way for an unprivileged local user to change the allowlist, blocklist or configuration.
+- A way to make the upgrade helper, which runs as root on a Mac installed with Homebrew, run
+  or install a program that does not match the checksum published with that version on the
+  Releases page, or hang or fill the disk while it reads Homebrew's folder.
 
 ## Known limitations (not vulnerabilities)
 
+- **The first Homebrew install is not checked.** `sudo /opt/homebrew/opt/phylode/bin/phylode
+  install` runs Homebrew's copy as root before anything compares it with the published
+  checksum, as any installer would; a program in your account that changed it between
+  `brew install` and that command would run as root. Every later version is checked.
+- **The checksum comes from the same GitHub account as the release.** It catches a copy
+  changed on your Mac, not a release published by someone who took over the maintainer's
+  GitHub account; two-factor sign-in on that account is what guards against that.
 - **DNS filtering only sees DNS.** A device that connects to an IP address directly, or
   looks up names through its own encrypted DNS server, is not filtered.
 - **iCloud Private Relay is deliberately left alone.** Apple states it protects Safari

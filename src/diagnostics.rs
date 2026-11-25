@@ -1,4 +1,4 @@
-//! `phylode diagnostics`: a report written to be pasted into a public bug report.
+//! `phylode feedback`: a report written to be pasted into a public bug report.
 //!
 //! It carries versions, states and counts — never a domain someone looked up, a network
 //! address other than loopback, a configured name, or a path under a home folder. The

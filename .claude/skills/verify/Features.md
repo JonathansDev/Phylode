@@ -6,7 +6,7 @@ meets; proof through one entry point does not cover another the file lists.
 | Feature | What the person sees |
 |---|---|
 | [DNS answers](Features/Dns-Answers.md) | Devices get answers, blocked names get `0.0.0.0`, outsiders get nothing |
-| [Command line](Features/Command-Line.md) | `allow`, `block`, `status`, `diagnostics`, `--version` and their messages |
+| [Command line](Features/Command-Line.md) | `allow`, `block`, `status`, `feedback`, `--version`, the help and their messages |
 | [Weekly summary](Features/Weekly-Summary.md) | `phylode report`: seven numbered sections about the week |
 | [Installation](Features/Installation.md) | `install`, `on`, `off`, `uninstall`, `forget`; only ever run in CI |
 
