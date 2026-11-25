@@ -754,13 +754,21 @@ jobs:
           ps -o user=,command= -p "$(sh .github/scripts/service-pid.sh)" | tee /dev/stderr \
             | grep -q '^_phylode ' || { echo "::error::the service does not run as _phylode"; exit 1; }
           sudo launchctl kickstart -k system/com.Phylode.blocklist-update
+          # The account is read again a moment after the process is first seen: one caught the
+          # instant launchd started it has shown as root, though the job sets UserName.
+          user=""
           for _ in $(seq 1 50); do
-            line=$(ps -axo user=,command= | grep '[p]hylode run lists' || true)
-            [ -n "$line" ] && break
+            pid=$(pgrep -f '^/usr/local/bin/phylode run lists' | head -1 || true)
+            if [ -n "$pid" ]; then
+              echo "first seen: $(ps -o user=,command= -p "$pid" || true)"
+              sleep 0.2
+              user=$(ps -o user= -p "$pid" | tr -d ' ' || true)
+              [ -n "$user" ] && break
+            fi
             sleep 0.1
           done
-          echo "$line"
-          echo "$line" | grep -q '^_phylode ' || { echo "::error::the list update does not run as _phylode"; exit 1; }
+          echo "the list update, process $pid, runs as: ${user:-(not seen running)}"
+          [ "$user" = _phylode ] || { echo "::error::the list update does not run as _phylode"; exit 1; }
 
       - name: uninstall says how to remove Homebrew's copy, then brew uninstall removes it
         run: |
