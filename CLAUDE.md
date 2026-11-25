@@ -97,7 +97,8 @@ Run this once before starting work and put the result in the first paragraph of 
   `release.yml` runs on a version tag (`1.2.0`, no `v`): it builds the Apple silicon
   program, attaches it with its checksums to the release, and publishes the formula
   (`.github/homebrew/phylode.rb`) to `JonathansDev/homebrew-tap`; started by hand, it only
-  builds and checks them.
+  builds and checks them. `published.yml`, started by hand after each release, installs from
+  the real tap over GitHub's HTTPS downloads and, given an earlier release, upgrades from it.
 - `.claude/settings.json` applies to every Claude Code session in this repository, cloud ones
   included: it keeps session links out of commits and pull requests and refuses force pushes,
   branch deletion and `gh repo delete`. Keep anything a cloud session must obey there or in

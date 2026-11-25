@@ -44,6 +44,7 @@ Preconditions: a branch pushed to GitHub. Every row runs in CI; read the run log
 | `I5` | the Upgrade test (`upgrade.yml`) on the pull request | it installs the previous release and updates by the README's steps |
 | `I6` | `./target/release/phylode run lists "$W" "$W/c.conf"` locally downloads the real lists into a scratch folder; run an edited copy of `deploy/update-blocklists.sh` with `bash` to test its limits | the new list in `$W`, or the held copy and its message |
 | `I7`–`I9` | the Install test's `install from Homebrew` job and the Upgrade test's `upgrade with brew upgrade` job | each step green; the `background-items` artifact holds what `sfltool dumpbtm` listed for Phylode |
+| `I7`, `I8` as published | after a release, `published.yml` by hand on `main`, with `from` set to the release before it | each step green: the real tap installs, answers, and `brew upgrade` brings the latest after the helper fetched its checksum from GitHub |
 
 ## Gotchas
 
